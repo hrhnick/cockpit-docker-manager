@@ -1009,7 +1009,7 @@
                 if (!stack.content) return null;
                 const images = parseUtils.images(stack.content);
                 
-                return utils.batchOperations.processParallel(images, this.checkImage, 5)
+                return utils.batchOperations.processParallel(images, this.checkImage.bind(this), 5)
                     .then(results => ({
                         stackName: stack.name,
                         hasUpdates: results.some(r => r.hasUpdate),
@@ -1386,7 +1386,7 @@
     window.DockerManager.stacks = Object.assign({
         loadStacks: loadStacks,
         renderStacks: renderStacks,
-        checkAllStacksForUpdates: updateChecker.checkAllStacks,
+        checkAllStacksForUpdates: updateChecker.checkAllStacks.bind(updateChecker),
         updateAllStacks: updateAllStacks,
         showStackModal: mode => getModals().showModal('stack-modal', { mode: mode }),
         hideStackModal: () => getModals().hideModal('stack-modal'),
