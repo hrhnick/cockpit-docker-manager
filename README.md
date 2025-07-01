@@ -2,6 +2,8 @@
 
 A hacked, probably broken, Docker management plugin for [Cockpit](https://cockpit-project.org/) that provides a web interface for managing Docker containers, stacks, images, networks, and volumes.
 
+![2025_06_30___21_48_38](https://github.com/user-attachments/assets/5e85af5b-2b3d-4be1-b419-5c76a2bfe668)
+
 ## Installation
 
 ```bash
