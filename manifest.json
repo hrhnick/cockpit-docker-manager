@@ -1,0 +1,14 @@
+{
+    "version": 0,
+    "require": {
+        "cockpit": "120"
+    },
+    "menu": {
+        "docker": {
+            "label": "Docker manager",
+            "order": 51,
+            "path": "index.html"
+        }
+    },
+    "content-security-policy": "default-src 'self' https: 'unsafe-inline'; connect-src wss: https:;"
+}

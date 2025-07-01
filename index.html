@@ -1,0 +1,394 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Docker containers</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <!-- Loading Spinner -->
+  <div id="loading-overlay">
+    <div class="spinner"></div>
+  </div>
+
+  <!-- Action Banner -->
+  <div id="action-banner" style="display: none;"></div>
+
+  <!-- Main Page Content -->
+  <main class="pf-v6-c-page__main">
+    <!-- Page Header - Outside content boxes -->
+    <header class="pf-v6-c-page__header">
+      <h2>Docker containers</h2>
+    </header>
+
+    <!-- Docker Not Installed Panel -->
+    <section id="docker-not-installed" class="docker-not-installed content-box" style="display: none;" aria-live="polite">
+      <h3>Docker is not installed</h3>
+      <p>To use Docker container management, you need to install Docker and its dependencies.</p>
+      
+      <div class="install-instructions">
+        <h4>Installation instructions:</h4>
+        
+        <div style="margin: 12px 0;">
+          <strong>Fedora/RHEL:</strong>
+          <div class="install-command">sudo dnf install docker docker-compose</div>
+        </div>
+        
+        <div style="margin: 12px 0;">
+          <strong>Debian/Ubuntu:</strong>
+          <div class="install-command">sudo apt install docker.io docker-compose</div>
+        </div>
+        
+        <div style="margin: 12px 0;">
+          <strong>Other distributions:</strong>
+          <a href="https://docs.docker.com/engine/install/" target="_blank" rel="noopener" class="install-link">Visit the Docker installation guide</a>
+        </div>
+      </div>
+      
+      <button type="button" class="pf-v6-c-button pf-v6-c-button--primary" onclick="window.location.reload()">
+        Check again
+      </button>
+    </section>
+
+    <!-- Service Status -->
+    <section id="service-status-section" class="service-status-section content-box" style="display: none;" aria-live="polite">
+      <div class="service-status-header">
+        <h3>Service Status</h3>
+        <div class="service-status-display">
+          <span class="service-name">Docker (dockerd)</span>
+          <span id="service-status-badge" class="status-badge status-unknown">Unknown</span>
+        </div>
+        <div class="service-actions">
+          <button type="button" class="pf-v6-c-button pf-v6-c-button--success-outline" id="start-service-btn" aria-label="Start Docker service">Start</button>
+          <button type="button" class="pf-v6-c-button pf-v6-c-button--warning-outline" id="restart-service-btn" aria-label="Restart Docker service" style="display: none;">Restart</button>
+          <button type="button" class="pf-v6-c-button pf-v6-c-button--danger-outline" id="stop-service-btn" aria-label="Stop Docker service" style="display: none;">Stop</button>
+          <div class="pf-v6-c-divider pf-m-vertical" role="separator"></div>
+          <button type="button" class="pf-v6-c-button pf-v6-c-button--primary" id="settings-btn" title="Settings">
+            Settings
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Main Content -->
+    <div id="main-content" class="content-box" style="display: none;">
+      <!-- Tab Navigation -->
+      <nav class="pf-v6-c-tabs" id="main-tabs" role="tablist">
+        <button type="button" class="pf-v6-c-tabs__tab active" data-tab="stacks" role="tab" aria-selected="true" aria-controls="stacks-tab">Stacks</button>
+        <button type="button" class="pf-v6-c-tabs__tab" data-tab="images" role="tab" aria-selected="false" aria-controls="images-tab">Images</button>
+        <button type="button" class="pf-v6-c-tabs__tab" data-tab="networks" role="tab" aria-selected="false" aria-controls="networks-tab">Networks</button>
+        <button type="button" class="pf-v6-c-tabs__tab" data-tab="volumes" role="tab" aria-selected="false" aria-controls="volumes-tab">Volumes</button>
+      </nav>
+
+      <!-- Stacks Tab -->
+      <section id="stacks-tab" class="tab-content active" role="tabpanel" aria-labelledby="stacks-tab-button">
+        <!-- Stacks Toolbar -->
+        <div class="table-toolbar">
+          <div class="search-section">
+            <label for="stacks-search" class="sr-only">Filter stacks</label>
+            <input type="search" id="stacks-search" class="search-input" placeholder="Filter stacks..." autocomplete="off">
+          </div>
+          <div class="toolbar-actions">
+            <button type="button" class="pf-v6-c-button pf-v6-c-button--primary" id="add-stack-btn">
+              Add stack
+            </button>
+          </div>
+        </div>
+        
+        <!-- Stacks Table -->
+        <div class="table-container">
+          <table class="data-table" id="stacks-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="name" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by name">
+                    <span>Stack Name</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="uptime" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by uptime">
+                    <span>Uptime</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="status" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by status">
+                    <span>Status</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="actions-column" scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="stacks-tbody">
+              <tr class="loading-row">
+                <td colspan="4" class="loading-cell">Loading stacks...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Images Tab -->
+      <section id="images-tab" class="tab-content" role="tabpanel" aria-labelledby="images-tab-button">
+        <!-- Images Toolbar -->
+        <div class="table-toolbar">
+          <div class="search-section">
+            <label for="images-search" class="sr-only">Filter images</label>
+            <input type="search" id="images-search" class="search-input" placeholder="Filter images..." autocomplete="off">
+          </div>
+          <div class="toolbar-actions">
+            <button type="button" class="pf-v6-c-button pf-v6-c-button--secondary" id="prune-images-btn">
+              <span>Prune unused</span>
+            </button>
+            <button type="button" class="pf-v6-c-button pf-v6-c-button--primary" id="pull-image-btn">
+              <span>Pull image</span>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Images Table -->
+        <div class="table-container">
+          <table class="data-table" id="images-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="repository" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by repository">
+                    <span>Repository</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="tag" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by tag">
+                    <span>Tag</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="size" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by size">
+                    <span>Size</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="created" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by created">
+                    <span>Created</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="status" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by status">
+                    <span>Status</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="actions-column" scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="images-tbody">
+              <tr class="loading-row">
+                <td colspan="6" class="loading-cell">Loading images...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Networks Tab -->
+      <section id="networks-tab" class="tab-content" role="tabpanel" aria-labelledby="networks-tab-button">
+        <!-- Networks Toolbar -->
+        <div class="table-toolbar">
+          <div class="search-section">
+            <label for="networks-search" class="sr-only">Filter networks</label>
+            <input type="search" id="networks-search" class="search-input" placeholder="Filter networks..." autocomplete="off">
+          </div>
+          <div class="toolbar-actions">
+            <button type="button" class="pf-v6-c-button pf-v6-c-button--secondary" id="prune-networks-btn">
+              <span>Prune unused</span>
+            </button>
+            <button type="button" class="pf-v6-c-button pf-v6-c-button--primary" id="create-network-btn">
+              <span>Create network</span>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Networks Table -->
+        <div class="table-container">
+          <table class="data-table" id="networks-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="name" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by name">
+                    <span>Network Name</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="driver" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by driver">
+                    <span>Driver</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="scope" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by scope">
+                    <span>Scope</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="containers" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by containers">
+                    <span>Containers</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="created" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by created">
+                    <span>Created</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="actions-column" scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="networks-tbody">
+              <tr class="loading-row">
+                <td colspan="6" class="loading-cell">Loading networks...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- Volumes Tab -->
+      <section id="volumes-tab" class="tab-content" role="tabpanel" aria-labelledby="volumes-tab-button">
+        <!-- Volumes Toolbar -->
+        <div class="table-toolbar">
+          <div class="search-section">
+            <label for="volumes-search" class="sr-only">Filter volumes</label>
+            <input type="search" id="volumes-search" class="search-input" placeholder="Filter volumes..." autocomplete="off">
+          </div>
+          <div class="toolbar-actions">
+            <button type="button" class="pf-v6-c-button pf-v6-c-button--secondary" id="prune-volumes-btn">
+              <span>Prune unused</span>
+            </button>
+            <button type="button" class="pf-v6-c-button pf-v6-c-button--primary" id="create-volume-btn">
+              <span>Create volume</span>
+            </button>
+          </div>
+        </div>
+        
+        <!-- Volumes Table -->
+        <div class="table-container">
+          <table class="data-table" id="volumes-table">
+            <thead>
+              <tr>
+                <th class="sortable" data-sort="name" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by name">
+                    <span>Volume Name</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="driver" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by driver">
+                    <span>Driver</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="mountpoint" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by mount point">
+                    <span>Mount Point</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="size" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by size">
+                    <span>Size</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="containers" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by containers">
+                    <span>Used By</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="sortable" data-sort="created" scope="col">
+                  <button type="button" class="sort-button" aria-label="Sort by created">
+                    <span>Created</span>
+                    <span class="sort-indicator" aria-hidden="true"></span>
+                  </button>
+                </th>
+                <th class="actions-column" scope="col">Actions</th>
+              </tr>
+            </thead>
+            <tbody id="volumes-tbody">
+              <tr class="loading-row">
+                <td colspan="7" class="loading-cell">Loading volumes...</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- View Stack Details Modal - This one needs special handling -->
+  <div id="view-stack-modal" class="pf-v6-c-modal" style="display: none;" role="dialog" aria-modal="true" aria-labelledby="view-modal-title">
+    <div class="pf-v6-c-modal__box view-modal-box">
+      <header class="pf-v6-c-modal__header">
+        <h3 id="view-modal-title">Stack Details</h3>
+        <button type="button" class="pf-v6-c-modal__close" id="close-view-modal" aria-label="Close dialog">&times;</button>
+      </header>
+      <div class="pf-v6-c-modal__body">
+        <!-- Modal tabs -->
+        <div class="modal-tabs" id="view-modal-tabs">
+          <button type="button" class="modal-tab active" data-tab="overview">Overview</button>
+          <button type="button" class="modal-tab" data-tab="compose">Configuration</button>
+          <button type="button" class="modal-tab" data-tab="logs">Logs</button>
+        </div>
+
+        <div class="modal-tab-content">
+          <!-- Overview tab -->
+          <div id="view-overview-content" class="tab-pane active">
+            <div class="loading-message">Loading container statistics...</div>
+          </div>
+
+          <!-- Compose tab -->
+          <div id="view-compose-content" class="tab-pane">
+            <textarea class="pf-v6-c-form__input docker-compose-editor" id="view-compose-textarea" readonly rows="15"></textarea>
+            <div class="env-section">
+              <h5>Environment Variables</h5>
+              <textarea class="pf-v6-c-form__input docker-compose-editor" id="view-env-textarea" readonly rows="10"></textarea>
+            </div>
+          </div>
+
+          <!-- Logs tab -->
+          <div id="view-logs-content" class="tab-pane">
+            <div class="logs-controls">
+              <input type="text" id="logs-filter" class="search-input" placeholder="Filter logs..." style="flex: 1;">
+              <span class="auto-update-text">Auto-updates every 3 seconds</span>
+            </div>
+            <div class="logs-container" id="view-logs-container">
+              <div class="loading-message">Loading logs...</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="../base1/cockpit.js"></script>
+  <!-- Load core modules that are always needed -->
+  <script src="modules/utils.js"></script>
+  <script src="modules/table.js"></script>
+  <script src="modules/modals.js"></script>
+  <script src="modules/config.js"></script>
+  <script src="modules/resources.js"></script>
+  <script src="modules/ui.js"></script>
+  <!-- Tab-specific modules will be loaded on demand -->
+  <!-- Main app coordinator now includes lazy loading -->
+  <script src="app.js"></script>
+</body>
+</html>
