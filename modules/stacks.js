@@ -17,6 +17,9 @@
         logsRefreshInterval: null
     };
 
+    // Track active operations to prevent double-clicks
+    const activeOperations = new Set();
+
     // File operations utility
     const fileOps = {
         composeVariants: ['docker-compose.yaml', 'docker-compose.yml', 'compose.yaml', 'compose.yml'],
@@ -193,31 +196,176 @@
         }
     };
 
-    // Stack actions factory
+    // Enhanced stack action factory with streaming support
     const createStackAction = (actionType, config) => {
         return function(stackName) {
             const utils = getUtils();
-            const resources = window.DockerManager.resources;
+            const dom = utils.dom;
             
-            const action = {
-                message: config.message.replace('{name}', stackName),
-                command: utils.dockerCommands.compose(stackName, config.command).command,
-                options: utils.dockerCommands.compose(stackName, config.command).options,
-                successMessage: config.successMessage.replace('{name}', stackName),
-                onSuccess: function() {
-                    setTimeout(loadStacks, config.delay || 2000);
+            // Check if operation is already in progress
+            const operationKey = `${actionType}-${stackName}`;
+            if (activeOperations.has(operationKey)) {
+                utils.showNotification('Operation already in progress', 'warning');
+                return;
+            }
+            
+            // Find and disable the button immediately
+            const button = findActionButton(actionType, stackName);
+            if (button) {
+                // Store original state
+                button.dataset.originalText = button.textContent;
+                button.dataset.originalClass = button.className;
+                
+                // Set loading state
+                dom.setLoading(button, true, config.loadingText || 'Processing...');
+                button.classList.remove('danger', 'warning', 'success', 'info');
+                button.classList.add('secondary');
+            }
+            
+            activeOperations.add(operationKey);
+            
+            const performAction = () => {
+                // Show initial notification
+                utils.showProgressNotification(config.message.replace('{name}', stackName), 'info');
+                
+                // Use streaming for operations that may take time
+                if (config.streaming !== false && (actionType === 'start' || actionType === 'create')) {
+                    return performStreamingAction(stackName, config, button, operationKey);
+                } else {
+                    return performStandardAction(stackName, config, button, operationKey);
                 }
             };
             
             if (config.confirm) {
-                action.confirm = config.confirm.replace('{name}', stackName);
-                action.confirmTitle = config.confirmTitle;
-                action.confirmLabel = config.confirmLabel;
+                const modals = getModals();
+                modals.confirm(config.confirm.replace('{name}', stackName), {
+                    title: config.confirmTitle,
+                    confirmLabel: config.confirmLabel || 'Yes'
+                }).then(confirmed => {
+                    if (confirmed) {
+                        performAction();
+                    } else {
+                        // Reset button state
+                        if (button) {
+                            dom.setLoading(button, false);
+                            button.className = button.dataset.originalClass;
+                            delete button.dataset.originalText;
+                            delete button.dataset.originalClass;
+                        }
+                        activeOperations.delete(operationKey);
+                    }
+                });
+            } else {
+                performAction();
             }
-            
-            resources.resourceActions.execute(action);
         };
     };
+
+    // Find action button by type and stack name
+    function findActionButton(actionType, stackName) {
+        const actionMap = {
+            'start': 'startStack',
+            'stop': 'stopStack',
+            'restart': 'restartStack',
+            'update': 'updateStack',
+            'remove': 'removeStack'
+        };
+        
+        const action = actionMap[actionType];
+        if (!action) return null;
+        
+        return document.querySelector(`[data-action="${action}"][data-name="${stackName}"]`);
+    }
+
+    // Perform standard (non-streaming) action - FIXED
+    function performStandardAction(stackName, config, button, operationKey) {
+        const utils = getUtils();
+        const dom = utils.dom;
+        
+        // Use runDockerCompose directly since it handles the command building internally
+        return utils.runDockerCompose(stackName, config.command)
+            .then(result => {
+                if (result.success) {
+                    utils.showNotification(config.successMessage.replace('{name}', stackName), 'success');
+                    if (config.onSuccess) config.onSuccess();
+                    setTimeout(loadStacks, config.delay || 1000);
+                } else {
+                    utils.showNotification('Failed: ' + utils.parseDockerError(result.error), 'error');
+                }
+            })
+            .finally(() => {
+                // Reset button state
+                if (button) {
+                    dom.setLoading(button, false);
+                    button.className = button.dataset.originalClass;
+                    delete button.dataset.originalText;
+                    delete button.dataset.originalClass;
+                }
+                activeOperations.delete(operationKey);
+                utils.hideProgressNotification();
+            });
+    }
+
+    // Perform streaming action with real-time progress - FIXED
+    function performStreamingAction(stackName, config, button, operationKey) {
+        const utils = getUtils();
+        const dom = utils.dom;
+        
+        let lastProgressUpdate = Date.now();
+        const progressUpdateInterval = 500; // Update UI at most every 500ms
+        
+        return utils.runDockerComposeStreaming(stackName, config.command, {
+            onProgress: function(progress) {
+                const now = Date.now();
+                if (now - lastProgressUpdate > progressUpdateInterval) {
+                    lastProgressUpdate = now;
+                    
+                    // Update notification based on progress type
+                    switch (progress.type) {
+                        case 'image-pull':
+                            utils.showProgressNotification('Pulling image: ' + progress.message, 'info');
+                            break;
+                        case 'download-progress':
+                            utils.showProgressNotification('Downloading: ' + progress.message, 'info');
+                            break;
+                        case 'container-operation':
+                            utils.showProgressNotification(progress.message, 'info');
+                            break;
+                        case 'network-operation':
+                        case 'volume-operation':
+                            utils.showProgressNotification(progress.message, 'info');
+                            break;
+                        default:
+                            // Only show non-empty status messages
+                            if (progress.message && progress.message.trim()) {
+                                utils.showProgressNotification(progress.message, 'info');
+                            }
+                    }
+                }
+            },
+            onError: function(error) {
+                utils.showNotification('Error: ' + utils.parseDockerError(error), 'error');
+            }
+        }).then(result => {
+            if (result.success) {
+                utils.showNotification(config.successMessage.replace('{name}', stackName), 'success');
+                if (config.onSuccess) config.onSuccess();
+                setTimeout(loadStacks, config.delay || 1000);
+            } else {
+                utils.showNotification('Failed: ' + utils.parseDockerError(result.error), 'error');
+            }
+        }).finally(() => {
+            // Reset button state
+            if (button) {
+                dom.setLoading(button, false);
+                button.className = button.dataset.originalClass;
+                delete button.dataset.originalText;
+                delete button.dataset.originalClass;
+            }
+            activeOperations.delete(operationKey);
+            utils.hideProgressNotification();
+        });
+    }
 
     // Initialize table configuration
     function initializeTable() {
@@ -703,7 +851,7 @@
         return '<div class="table-action-buttons">' + buttonsHtml + '</div>';
     }
 
-    // Stack operations
+    // Stack operations with enhanced progress
     function handleCreateStack(formData) {
         const app = getApp();
         const utils = getUtils();
@@ -711,7 +859,7 @@
         const content = formData['docker-compose-content'];
         const envContent = formData['env-content'];
         
-        utils.showNotification('Creating stack "' + stackName + '"...', 'info');
+        utils.showProgressNotification('Creating stack "' + stackName + '"...', 'info');
         
         const stackDir = app.stacksPath + '/' + stackName;
         
@@ -727,11 +875,17 @@
         const utils = getUtils();
         
         const tasks = [
-            () => fileOps.write(stackName, 'compose', content),
-            () => envContent ? fileOps.write(stackName, 'env', envContent) : { success: true },
-            () => createBuildContexts(stackName, content),
             () => {
-                utils.showNotification('Validating configuration...', 'info');
+                utils.showProgressNotification('Writing configuration files...', 'info');
+                return fileOps.write(stackName, 'compose', content);
+            },
+            () => envContent ? fileOps.write(stackName, 'env', envContent) : { success: true },
+            () => {
+                utils.showProgressNotification('Creating build contexts...', 'info');
+                return createBuildContexts(stackName, content);
+            },
+            () => {
+                utils.showProgressNotification('Validating configuration...', 'info');
                 return utils.runDockerCompose(stackName, ['config', '--quiet'], { suppressError: true });
             }
         ];
@@ -744,6 +898,8 @@
             utils.showNotification(message, lastResult.success ? 'success' : 'warning');
             loadStacks();
             return true;
+        }).finally(() => {
+            utils.hideProgressNotification();
         });
     }
 
@@ -752,7 +908,7 @@
         const content = formData['docker-compose-content'];
         const envContent = formData['env-content'];
         
-        utils.showNotification('Saving stack "' + stackName + '"...', 'info');
+        utils.showProgressNotification('Saving stack "' + stackName + '"...', 'info');
         
         const tasks = [
             () => fileOps.write(stackName, 'compose', content),
@@ -769,6 +925,8 @@
             utils.showNotification(message, lastResult.success ? 'success' : 'warning');
             loadStacks();
             return true;
+        }).finally(() => {
+            utils.hideProgressNotification();
         });
     }
 
@@ -890,7 +1048,7 @@
         }
     };
 
-    // Stack update execution
+    // Stack update execution with enhanced progress
     function updateStack(stackName) {
         const resources = window.DockerManager.resources;
         
@@ -906,6 +1064,8 @@
         const app = getApp();
         const utils = getUtils();
         
+        utils.showProgressNotification('Preparing to update stack "' + stackName + '"...', 'info');
+        
         return utils.executeCommand(['mkdir', '-p', app.stacksPath + '/' + stackName], { superuser: 'require' })
             .then(() => {
                 const backupPath = app.stacksPath + '/' + stackName + '/.backup.json';
@@ -914,14 +1074,38 @@
             })
             .then(() => {
                 const steps = [
-                    { message: 'Pulling latest images...', command: ['pull'] },
-                    { message: 'Recreating containers...', command: ['up', '-d', '--force-recreate'] },
-                    { message: 'Cleaning old images...', command: ['image', 'prune', '-f'] }
+                    { 
+                        message: 'Pulling latest images for "' + stackName + '"...', 
+                        command: ['pull'],
+                        streaming: true
+                    },
+                    { 
+                        message: 'Recreating containers for "' + stackName + '"...', 
+                        command: ['up', '-d', '--force-recreate'],
+                        streaming: true
+                    },
+                    { 
+                        message: 'Cleaning old images...', 
+                        command: ['image', 'prune', '-f'],
+                        streaming: false
+                    }
                 ];
                 
                 return utils.batchOperations.processSequentially(steps, step => {
-                    utils.showNotification(step.message, 'info');
-                    return utils.runDockerCompose(stackName, step.command);
+                    if (step.streaming) {
+                        return utils.runDockerComposeStreaming(stackName, step.command, {
+                            onProgress: function(progress) {
+                                if (progress.type === 'image-pull' || progress.type === 'download-progress') {
+                                    utils.showProgressNotification(progress.message, 'info');
+                                } else if (progress.type === 'container-operation') {
+                                    utils.showProgressNotification(progress.message, 'info');
+                                }
+                            }
+                        });
+                    } else {
+                        utils.showProgressNotification(step.message, 'info');
+                        return utils.runDockerCompose(stackName, step.command);
+                    }
                 }, 1000);
             })
             .then(() => {
@@ -931,6 +1115,9 @@
             .catch(error => {
                 utils.showNotification('Update failed: ' + error.message, 'error');
                 throw error;
+            })
+            .finally(() => {
+                utils.hideProgressNotification();
             });
     }
 
@@ -952,13 +1139,13 @@
         ).then(confirmed => {
             if (!confirmed) return;
             
-            utils.showNotification('Starting update of ' + stacksToUpdate.length + ' stacks...', 'info');
+            utils.showProgressNotification('Starting update of ' + stacksToUpdate.length + ' stacks...', 'info');
             
             let currentIndex = 0;
             utils.batchOperations.processSequentially(
                 stacksToUpdate,
                 stackName => {
-                    utils.showNotification('Updating stack ' + (++currentIndex) + ' of ' + stacksToUpdate.length + ': ' + stackName, 'info');
+                    utils.showProgressNotification('Updating stack ' + (++currentIndex) + ' of ' + stacksToUpdate.length + ': ' + stackName, 'info');
                     return safeUpdateStack(stackName).catch(error => {
                         utils.showNotification('Failed to update ' + stackName + ', continuing with next stack', 'warning');
                         return null;
@@ -968,6 +1155,8 @@
             ).then(() => {
                 utils.showNotification('All stacks updated successfully', 'success');
                 updateChecker.checkAllStacks(false);
+            }).finally(() => {
+                utils.hideProgressNotification();
             });
         });
     }
@@ -1099,50 +1288,91 @@
         getTable().renderTable('stacks-table', getApp().stacks);
     }
 
-    // Stack actions
+    // Enhanced stack actions with streaming support
     const stackActions = {
         viewStack: stackName => showViewStackModal(stackName),
         editStack: stackName => getModals().showModal('stack-modal', { mode: 'edit', stackName: stackName }),
         startStack: createStackAction('start', {
             message: 'Starting stack "{name}"...',
             command: ['up', '-d'],
-            successMessage: 'Stack "{name}" started successfully'
+            successMessage: 'Stack "{name}" started successfully',
+            loadingText: 'Starting...',
+            streaming: true,
+            delay: 2000
         }),
         stopStack: createStackAction('stop', {
             message: 'Stopping stack "{name}"...',
             command: ['down'],
             successMessage: 'Stack "{name}" stopped',
+            loadingText: 'Stopping...',
+            streaming: false,
             delay: 1000
         }),
         restartStack: createStackAction('restart', {
             message: 'Restarting stack "{name}"...',
             command: ['restart'],
-            successMessage: 'Stack "{name}" restarted successfully'
+            successMessage: 'Stack "{name}" restarted successfully',
+            loadingText: 'Restarting...',
+            streaming: false,
+            delay: 2000
         }),
         updateStack: updateStack,
         removeStack: stackName => {
             const app = getApp();
             const utils = getUtils();
             const resources = window.DockerManager.resources;
+            const dom = utils.dom;
+            
+            // Check if operation is already in progress
+            const operationKey = `remove-${stackName}`;
+            if (activeOperations.has(operationKey)) {
+                utils.showNotification('Operation already in progress', 'warning');
+                return;
+            }
             
             resources.resourceActions.execute({
                 confirm: 'Remove stack "' + stackName + '"? This will stop all containers and delete the stack configuration.',
                 confirmTitle: 'Remove Stack',
                 confirmLabel: 'Remove',
                 onSuccess: () => {
-                    utils.showNotification('Removing stack "' + stackName + '"...', 'info');
+                    activeOperations.add(operationKey);
                     
-                    const stopCommand = utils.dockerCommands.compose(stackName, ['down', '-v']);
-                    utils.executeCommand(stopCommand.command, stopCommand.options)
-                        .then(() => utils.executeCommand(['rm', '-rf', app.stacksPath + '/' + stackName], { superuser: 'require' }))
-                        .then(result => {
-                            if (result.success) {
-                                utils.showNotification('Stack "' + stackName + '" removed', 'success');
-                                loadStacks();
-                            } else {
-                                utils.showNotification('Failed to remove stack: ' + utils.parseDockerError(result.error), 'error');
+                    // Find and disable the button
+                    const button = findActionButton('remove', stackName);
+                    if (button) {
+                        dom.setLoading(button, true, 'Removing...');
+                    }
+                    
+                    utils.showProgressNotification('Removing stack "' + stackName + '"...', 'info');
+                    
+                    // Use streaming to show progress
+                    utils.runDockerComposeStreaming(stackName, ['down', '-v'], {
+                        onProgress: function(progress) {
+                            if (progress.type === 'container-operation' && progress.message.includes('Stopping')) {
+                                utils.showProgressNotification('Stopping containers...', 'info');
+                            } else if (progress.message && progress.message.includes('Removing')) {
+                                utils.showProgressNotification('Removing containers and volumes...', 'info');
                             }
-                        });
+                        }
+                    }).then(() => {
+                        utils.showProgressNotification('Deleting stack configuration...', 'info');
+                        return utils.executeCommand(['rm', '-rf', app.stacksPath + '/' + stackName], { superuser: 'require' });
+                    }).then(result => {
+                        if (result.success) {
+                            utils.showNotification('Stack "' + stackName + '" removed', 'success');
+                            loadStacks();
+                        } else {
+                            utils.showNotification('Failed to remove stack: ' + utils.parseDockerError(result.error), 'error');
+                        }
+                    }).finally(() => {
+                        activeOperations.delete(operationKey);
+                        utils.hideProgressNotification();
+                        
+                        // Reset button if it still exists
+                        if (button && button.parentNode) {
+                            dom.setLoading(button, false);
+                        }
+                    });
                 }
             });
         }

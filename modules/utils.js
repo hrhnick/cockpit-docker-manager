@@ -5,6 +5,9 @@
     // Initialize namespace if needed
     window.DockerManager = window.DockerManager || {};
     
+    // Cache for docker-compose command
+    let dockerComposeCommandCache = null;
+    
     // Core utility functions
     function executeCommand(command, options) {
         options = options || {};
@@ -15,6 +18,42 @@
             .catch(function(error) {
                 return { success: false, error: error.message || error.toString() };
             });
+    }
+
+    // New streaming command executor for real-time output
+    function executeCommandStreaming(command, options, callbacks) {
+        options = options || {};
+        callbacks = callbacks || {};
+        
+        const proc = cockpit.spawn(command, options);
+        let output = '';
+        let error = '';
+        
+        if (callbacks.onOutput) {
+            proc.stream(function(data) {
+                output += data;
+                // Process line by line
+                const lines = data.split('\n');
+                lines.forEach(function(line) {
+                    if (line.trim()) {
+                        callbacks.onOutput(line);
+                    }
+                });
+            });
+        }
+        
+        if (callbacks.onError) {
+            proc.fail(function(err) {
+                error = err;
+                callbacks.onError(err);
+            });
+        }
+        
+        return proc.then(function() {
+            return { success: true, data: output };
+        }).catch(function(err) {
+            return { success: false, error: error || err.message || err.toString(), data: output };
+        });
     }
 
     function getElement(id) {
@@ -31,6 +70,27 @@
             setTimeout(function() {
                 banner.style.display = 'none';
             }, 4000);
+        }
+    }
+
+    // New function for persistent notifications
+    function showProgressNotification(message, type) {
+        type = type || 'info';
+        const banner = getElement('action-banner');
+        if (banner) {
+            banner.textContent = message;
+            banner.className = type;
+            banner.style.display = 'block';
+            // Don't auto-hide progress notifications
+        }
+    }
+
+    function hideProgressNotification() {
+        const banner = getElement('action-banner');
+        if (banner) {
+            setTimeout(function() {
+                banner.style.display = 'none';
+            }, 2000);
         }
     }
 
@@ -71,6 +131,28 @@
             }
             
             return el;
+        },
+
+        // Add loading state to element
+        setLoading: function(el, isLoading, loadingText) {
+            if (typeof el === 'string') el = getElement(el);
+            if (!el) return;
+            
+            if (isLoading) {
+                el.disabled = true;
+                el.classList.add('is-loading');
+                if (loadingText && el.dataset.originalText === undefined) {
+                    el.dataset.originalText = el.textContent;
+                    el.textContent = loadingText;
+                }
+            } else {
+                el.disabled = false;
+                el.classList.remove('is-loading');
+                if (el.dataset.originalText !== undefined) {
+                    el.textContent = el.dataset.originalText;
+                    delete el.dataset.originalText;
+                }
+            }
         },
 
         // Efficient append with fragment support
@@ -161,6 +243,11 @@
             if (el) el.classList.toggle(className, force);
         },
 
+        hasClass: function(el, className) {
+            if (typeof el === 'string') el = getElement(el);
+            return el ? el.classList.contains(className) : false;
+        },
+
         // Query utilities with caching
         query: function(selector, parent) {
             return (parent || document).querySelector(selector);
@@ -238,14 +325,18 @@
         }
     };
 
-    // Docker command builders (unchanged)
+    // Fixed Docker command builders
     const dockerCommands = {
         compose: function(stack, action, options) {
-            const baseCmd = this._getComposeCommand();
+            // This now returns the command structure with a placeholder for the compose command
+            // The actual command will be resolved when executed
             const workDir = window.DockerManager.app.stacksPath + '/' + stack;
             const args = [].concat(action, options || []);
             return {
-                command: ['sh', '-c', 'cd "' + workDir + '" && ' + baseCmd + ' ' + args.join(' ')],
+                stack: stack,
+                workDir: workDir,
+                action: action,
+                args: args,
                 options: { superuser: 'require' }
             };
         },
@@ -262,17 +353,6 @@
                 command: ['docker', type, action].concat(args || []),
                 options: options || { superuser: 'require' }
             };
-        },
-
-        _getComposeCommand: function() {
-            // Cache the result
-            if (this._composeCmd) return this._composeCmd;
-            
-            return executeCommand(['which', 'docker-compose'], { suppressError: true })
-                .then(function(result) {
-                    dockerCommands._composeCmd = result.success ? 'docker-compose' : 'docker compose';
-                    return dockerCommands._composeCmd;
-                });
         }
     };
 
@@ -476,6 +556,68 @@
         return errorLine || lines[0] || error.split('\n')[0];
     }
 
+    // Parse docker-compose output for progress updates
+    function parseDockerComposeProgress(line, stackName) {
+        // Image pull progress
+        if (line.includes('Pulling from') || line.includes('Pull complete')) {
+            const imageMatch = line.match(/(\S+):\s*(Pulling from .+|Pull complete)/);
+            if (imageMatch) {
+                return {
+                    type: 'image-pull',
+                    message: imageMatch[1] + ': ' + imageMatch[2]
+                };
+            }
+        }
+        
+        // Download progress
+        if (line.includes('Downloading') || line.includes('Extracting')) {
+            const progressMatch = line.match(/(\S+):\s*(Downloading|Extracting)\s*\[([=>-]+)\]\s*(.+)/);
+            if (progressMatch) {
+                return {
+                    type: 'download-progress',
+                    message: progressMatch[1] + ': ' + progressMatch[2] + ' ' + progressMatch[4]
+                };
+            }
+        }
+        
+        // Container operations
+        if (line.includes('Creating') || line.includes('Starting') || line.includes('Stopping')) {
+            const containerMatch = line.match(/(Creating|Starting|Stopping)\s+(\S+)/);
+            if (containerMatch) {
+                return {
+                    type: 'container-operation',
+                    message: containerMatch[1] + ' container: ' + containerMatch[2]
+                };
+            }
+        }
+        
+        // Network operations
+        if (line.includes('Creating network')) {
+            return {
+                type: 'network-operation',
+                message: line.trim()
+            };
+        }
+        
+        // Volume operations
+        if (line.includes('Creating volume')) {
+            return {
+                type: 'volume-operation',
+                message: line.trim()
+            };
+        }
+        
+        // Generic status
+        if (line.trim()) {
+            return {
+                type: 'status',
+                message: line.trim()
+            };
+        }
+        
+        return null;
+    }
+
     function formatDate(dateStr) {
         if (!dateStr) return 'Unknown';
         
@@ -507,17 +649,25 @@
 
     // Docker Compose command handling
     function getDockerComposeCommand() {
+        // Return cached value if available
+        if (dockerComposeCommandCache !== null) {
+            return Promise.resolve(dockerComposeCommandCache);
+        }
+        
         // Check if we should use 'docker-compose' or 'docker compose'
         return executeCommand(['which', 'docker-compose'], { suppressError: true })
             .then(function(result) {
                 if (result.success) {
-                    return ['docker-compose'];  // v1 found
+                    dockerComposeCommandCache = 'docker-compose';
+                    return 'docker-compose';  // v1 found
                 } else {
-                    return ['docker', 'compose'];  // Fall back to v2
+                    dockerComposeCommandCache = 'docker compose';
+                    return 'docker compose';  // Fall back to v2
                 }
             });
     }
 
+    // Enhanced runDockerCompose that properly handles the compose command structure
     function runDockerCompose(stackName, args, options) {
         options = options || {};
         const app = window.DockerManager.app;
@@ -526,7 +676,7 @@
         return getDockerComposeCommand()
             .then(function(baseCommand) {
                 // Change to stack directory and run command
-                const fullCommand = ['sh', '-c', 'cd "' + workDir + '" && ' + baseCommand.join(' ') + ' ' + args.join(' ')];
+                const fullCommand = ['sh', '-c', 'cd "' + workDir + '" && ' + baseCommand + ' ' + args.join(' ')];
                 const commandOptions = { superuser: 'require' };
                 if (options.suppressError) {
                     commandOptions.suppressError = true;
@@ -535,6 +685,28 @@
             })
             .catch(function(error) {
                 return { success: false, error: error.message || error.toString() };
+            });
+    }
+
+    // Enhanced Docker Compose command with streaming
+    function runDockerComposeStreaming(stackName, args, callbacks) {
+        const app = window.DockerManager.app;
+        const workDir = app.stacksPath + '/' + stackName;
+        
+        return getDockerComposeCommand()
+            .then(function(baseCommand) {
+                const fullCommand = ['sh', '-c', 'cd "' + workDir + '" && ' + baseCommand + ' ' + args.join(' ')];
+                const commandOptions = { superuser: 'require' };
+                
+                return executeCommandStreaming(fullCommand, commandOptions, {
+                    onOutput: function(line) {
+                        const progress = parseDockerComposeProgress(line, stackName);
+                        if (progress && callbacks.onProgress) {
+                            callbacks.onProgress(progress);
+                        }
+                    },
+                    onError: callbacks.onError
+                });
             });
     }
 
@@ -702,13 +874,18 @@
     window.DockerManager.utils = {
         // Core utilities
         executeCommand: executeCommand,
+        executeCommandStreaming: executeCommandStreaming,
         getElement: getElement,
         showNotification: showNotification,
+        showProgressNotification: showProgressNotification,
+        hideProgressNotification: hideProgressNotification,
         escapeHtml: escapeHtml,
         parseDockerError: parseDockerError,
+        parseDockerComposeProgress: parseDockerComposeProgress,
         formatDate: formatDate,
         getDockerComposeCommand: getDockerComposeCommand,
         runDockerCompose: runDockerCompose,
+        runDockerComposeStreaming: runDockerComposeStreaming,
         parseSize: parseSize,
         parseTime: parseTime,
         

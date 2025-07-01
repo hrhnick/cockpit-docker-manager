@@ -1,5 +1,30 @@
 /* PatternFly-inspired styles for Cockpit Docker Manager - Optimized v6 */
 
+/* Performance optimizations for initial render */
+body {
+    /* Prevent layout shifts during loading */
+    min-height: 100vh;
+    contain: layout style;
+}
+
+.pf-v6-c-page__main {
+    /* Improve rendering performance */
+    will-change: contents;
+    contain: layout style;
+}
+
+/* Force GPU acceleration for smoother rendering */
+@media screen {
+    .content-box,
+    #main-content,
+    .pf-v6-c-modal,
+    .service-status-section,
+    .docker-not-installed {
+        transform: translateZ(0);
+        backface-visibility: hidden;
+    }
+}
+
 /* CSS Variables - Consolidated */
 :root {
   /* Core colors */
@@ -484,6 +509,18 @@ textarea {
   opacity: 0.6;
   cursor: not-allowed;
   pointer-events: none;
+}
+
+/* Button loading state */
+.pf-v6-c-button.is-loading,
+.table-action-btn.is-loading {
+  cursor: wait;
+  opacity: 0.8;
+}
+
+.pf-v6-c-button.is-loading:active,
+.table-action-btn.is-loading:active {
+  transform: none;
 }
 
 /* Button variants using CSS variables */
@@ -1176,15 +1213,16 @@ textarea {
   color: var(--warning-dark);
 }
 
-/* Loading overlay */
+/* Loading overlay - Ensure smooth display */
 #loading-overlay {
   position: fixed;
   inset: 0;
-  background: rgba(255, 255, 255, 0.9);
+  background: rgba(255, 255, 255, 0.95);
   display: flex;
   justify-content: center;
   align-items: center;
   z-index: var(--z-overlay);
+  transition: opacity 0.3s ease-out;
 }
 
 /* YAML syntax highlighting */
@@ -1323,7 +1361,7 @@ textarea {
   #action-banner.error { background: rgba(240, 57, 43, 0.2); color: var(--danger); }
   #action-banner.warning { background: rgba(240, 171, 0, 0.2); color: var(--warning); }
   
-  #loading-overlay { background: rgba(21, 21, 21, 0.9); }
+  #loading-overlay { background: rgba(21, 21, 21, 0.95); }
   
   .settings-info-box {
     background: rgba(255, 255, 255, 0.05);
