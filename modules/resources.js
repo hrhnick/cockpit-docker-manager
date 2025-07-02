@@ -145,8 +145,27 @@
             // Add common renderers
             columns.forEach(function(col) {
                 if (col.key === 'created' && !col.renderer) {
-                    col.renderer = function(value) { return utils().formatDate(value); };
-                    col.sortTransform = function(value) { return value ? new Date(value).getTime() : 0; };
+                    // Special handling for images - CreatedSince is already human-readable
+                    if (resourceType === 'images') {
+                        col.renderer = function(value, item) { 
+                            // Try multiple possible field names
+                            const created = item.createdSince || item.CreatedSince || item.created || value;
+                            return created && created !== '' ? created : 'Unknown'; 
+                        };
+                        col.sortTransform = function(value, item) { 
+                            // For sorting, try to parse relative time strings
+                            const created = item.createdSince || item.CreatedSince || item.created || value;
+                            return parseRelativeTime(created);
+                        };
+                    } else {
+                        col.renderer = function(value) { 
+                            // For networks and volumes, format the timestamp
+                            return value ? utils().formatDate(value) : 'Unknown'; 
+                        };
+                        col.sortTransform = function(value) { 
+                            return value ? new Date(value).getTime() : 0; 
+                        };
+                    }
                 }
                 if (col.key === 'size' && !col.sortTransform) {
                     col.sortTransform = utils().parseSize;
@@ -167,6 +186,44 @@
             }, config.tableConfig || {});
 
             table().registerTable(tableId, finalTableConfig);
+        }
+
+        // Helper function to parse relative time strings for sorting
+        function parseRelativeTime(timeStr) {
+            if (!timeStr || timeStr === 'Unknown') return 0;
+            
+            // If it's an ISO timestamp, parse it directly
+            if (timeStr.includes('T') || timeStr.includes('-')) {
+                const timestamp = new Date(timeStr).getTime();
+                return isNaN(timestamp) ? 0 : timestamp;
+            }
+            
+            // Parse strings like "2 weeks ago", "3 days ago", etc.
+            const match = timeStr.match(/(\d+)\s+(\w+)\s+ago/);
+            if (!match) return 0;
+            
+            const value = parseInt(match[1]);
+            const unit = match[2].toLowerCase();
+            
+            const multipliers = {
+                'second': 1000,
+                'seconds': 1000,
+                'minute': 60000,
+                'minutes': 60000,
+                'hour': 3600000,
+                'hours': 3600000,
+                'day': 86400000,
+                'days': 86400000,
+                'week': 604800000,
+                'weeks': 604800000,
+                'month': 2592000000,
+                'months': 2592000000,
+                'year': 31536000000,
+                'years': 31536000000
+            };
+            
+            const multiplier = multipliers[unit] || 0;
+            return Date.now() - (value * multiplier);
         }
 
         // Initialize modal with enhanced field handling
@@ -198,7 +255,16 @@
             const tableId = resourceType + '-table';
             table().showLoading(tableId);
             
-            const listCommand = utils().dockerCommands.resource(dockerCommand, 'ls', ['--format', 'json']).command;
+            // For images, use a custom format to get CreatedSince
+            let listCommand;
+            if (resourceType === 'images') {
+                listCommand = utils().dockerCommands.docker(
+                    ['images', '--format', '{{json .}}'],
+                    []
+                ).command;
+            } else {
+                listCommand = utils().dockerCommands.resource(dockerCommand, 'ls', ['--format', 'json']).command;
+            }
             
             utils().executeCommand(listCommand, { superuser: 'try', suppressError: true })
                 .then(function(result) {
@@ -324,12 +390,18 @@
         switch (resourceType) {
             case 'images':
                 return resources.map(function(image) {
+                    // Docker images --format '{{json .}}' provides both CreatedAt and CreatedSince
+                    const createdSince = image.CreatedSince || '';
+                    const createdAt = image.CreatedAt || '';
+                    
                     return {
                         id: image.ID,
-                        repository: image.Repository,
-                        tag: image.Tag,
-                        size: image.Size,
-                        created: image.CreatedAt,
+                        repository: image.Repository || '<none>',
+                        tag: image.Tag || '<none>',
+                        size: image.Size || '0B',
+                        created: createdSince || createdAt || '',  // Prefer human-readable format
+                        createdSince: createdSince,
+                        createdAt: createdAt,
                         inUse: false
                     };
                 });
@@ -340,7 +412,7 @@
                         name: network.Name,
                         driver: network.Driver,
                         scope: network.Scope,
-                        created: network.CreatedAt,
+                        created: '',  // Will be populated by inspect
                         containers: []
                     };
                 });
@@ -352,7 +424,7 @@
                         driver: volume.Driver,
                         mountpoint: volume.Mountpoint || '',
                         size: 'Calculating...',
-                        created: '',
+                        created: '',  // Will be populated by inspect
                         containers: []
                     };
                 });
@@ -438,14 +510,37 @@
         utils().batchOperations.processParallel(
             networks,
             function(network) {
+                // Use separate commands to avoid parsing issues
                 return utils().executeCommand([
-                    'docker', 'network', 'inspect', network.id, 
-                    '--format', '{{range $k, $v := .Containers}}{{$v.Name}}{{" "}}{{end}}'
+                    'docker', 'network', 'inspect', network.id
                 ], { superuser: 'try', suppressError: true })
                     .then(function(result) {
                         if (result.success) {
-                            network.containers = result.data.trim().split(' ')
-                                .filter(function(name) { return name; });
+                            try {
+                                const data = JSON.parse(result.data);
+                                if (data && data[0]) {
+                                    network.created = data[0].Created || '';
+                                    // Extract container names
+                                    if (data[0].Containers) {
+                                        network.containers = Object.values(data[0].Containers)
+                                            .map(function(container) { return container.Name; })
+                                            .filter(function(name) { return name; });
+                                    } else {
+                                        network.containers = [];
+                                    }
+                                }
+                            } catch (e) {
+                                // If JSON parsing fails, try the format string approach
+                                return utils().executeCommand([
+                                    'docker', 'network', 'inspect', network.id, 
+                                    '--format', '{{.Created}}'
+                                ], { superuser: 'try', suppressError: true })
+                                    .then(function(result2) {
+                                        if (result2.success) {
+                                            network.created = result2.data.trim() || '';
+                                        }
+                                    });
+                            }
                         }
                         return network;
                     });
