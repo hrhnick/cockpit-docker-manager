@@ -1,4 +1,4 @@
-// Docker Manager - Utility Functions Module (Enhanced)
+// Docker Manager - Utility Functions Module (Cleaned and Optimized)
 (function() {
     'use strict';
 
@@ -16,7 +16,26 @@
                 return { success: true, data: result };
             })
             .catch(function(error) {
-                return { success: false, error: error.message || error.toString() };
+                // For commands that exit with non-zero status, the output might be in the message
+                let errorMessage = error.message || error.toString();
+                
+                // Cockpit sometimes puts the actual command output in the 'details' field
+                if (error.details && typeof error.details === 'string') {
+                    errorMessage = error.details;
+                }
+                
+                // Check if the error contains actual output (common with docker-compose errors)
+                if (error.problem === 'non-zero-exit-status' && errorMessage) {
+                    // The actual error output is in the message
+                    return { success: false, error: errorMessage, data: errorMessage };
+                }
+                
+                // Check if there's useful error info in the message that looks like YAML errors
+                if (errorMessage.includes('yaml:') || errorMessage.includes('mapping values')) {
+                    return { success: false, error: errorMessage, data: errorMessage };
+                }
+                
+                return { success: false, error: errorMessage };
             });
     }
 
@@ -28,6 +47,8 @@
         const proc = cockpit.spawn(command, options);
         let output = '';
         let error = '';
+        let allOutput = []; // Store all output lines for error analysis
+        let yamlError = null; // Track multi-line YAML errors
         
         if (callbacks.onOutput) {
             proc.stream(function(data) {
@@ -36,6 +57,16 @@
                 const lines = data.split('\n');
                 lines.forEach(function(line) {
                     if (line.trim()) {
+                        allOutput.push(line);
+                        
+                        // Check if this is the start of a YAML error
+                        if (line.includes('yaml:') && line.includes('line')) {
+                            yamlError = line;
+                        } else if (yamlError && line.trim() && !line.match(/^\s*\^/)) {
+                            // If we have a YAML error and this line continues it
+                            yamlError += ' ' + line.trim();
+                        }
+                        
                         callbacks.onOutput(line);
                     }
                 });
@@ -44,15 +75,41 @@
         
         if (callbacks.onError) {
             proc.fail(function(err) {
-                error = err;
-                callbacks.onError(err);
+                const errorMessage = err.message || err.toString() || err;
+                error = errorMessage;
+                callbacks.onError(errorMessage);
             });
         }
         
         return proc.then(function() {
             return { success: true, data: output };
         }).catch(function(err) {
-            return { success: false, error: error || err.message || err.toString(), data: output };
+            // Try to find a meaningful error message from the output
+            let errorMessage = error || err.message || err.toString() || err;
+            
+            // If we captured a YAML error, use that
+            if (yamlError) {
+                errorMessage = yamlError;
+            } else if (allOutput.length > 0 && (!errorMessage || errorMessage === 'non-zero exit status')) {
+                // Look for error patterns in the output
+                const errorLine = allOutput.find(function(line) {
+                    return line.includes('yaml:') || 
+                           line.includes('error:') || 
+                           line.includes('Error:') ||
+                           line.includes('mapping values') ||
+                           line.includes('failed') ||
+                           line.includes('cannot') ||
+                           line.includes('ERROR') ||
+                           line.includes('Invalid') ||
+                           line.includes('Unknown');
+                });
+                
+                if (errorLine) {
+                    errorMessage = errorLine.trim();
+                }
+            }
+            
+            return { success: false, error: errorMessage, data: output };
         });
     }
 
@@ -60,28 +117,31 @@
         return document.getElementById(id);
     }
 
-    function showNotification(message, type) {
+    // Unified notification system
+    function showNotification(message, type, options) {
         type = type || 'info';
+        options = options || {};
         const banner = getElement('action-banner');
         if (banner) {
             banner.textContent = message;
             banner.className = type;
             banner.style.display = 'block';
-            setTimeout(function() {
-                banner.style.display = 'none';
-            }, 4000);
-        }
-    }
-
-    // New function for persistent notifications
-    function showProgressNotification(message, type) {
-        type = type || 'info';
-        const banner = getElement('action-banner');
-        if (banner) {
-            banner.textContent = message;
-            banner.className = type;
-            banner.style.display = 'block';
-            // Don't auto-hide progress notifications
+            
+            // Don't auto-hide if persist is true
+            if (!options.persist) {
+                // Clear any existing timeout
+                if (banner.hideTimeout) {
+                    clearTimeout(banner.hideTimeout);
+                }
+                
+                // Error messages stay longer by default
+                const duration = options.duration || (type === 'error' ? 8000 : 4000);
+                
+                banner.hideTimeout = setTimeout(function() {
+                    banner.style.display = 'none';
+                    banner.hideTimeout = null;
+                }, duration);
+            }
         }
     }
 
@@ -100,9 +160,9 @@
         return div.innerHTML;
     }
 
-    // Modern DOM manipulation utilities
+    // Simplified DOM manipulation utilities
     const dom = {
-        // Enhanced element creation with template support
+        // Enhanced element creation
         create: function(tag, attrs, children) {
             const el = document.createElement(tag);
             
@@ -183,39 +243,6 @@
             }
         },
 
-        // Template literal HTML creation
-        html: function(strings, ...values) {
-            const html = strings.reduce((result, str, i) => {
-                const value = values[i - 1];
-                if (value === undefined) return result + str;
-                
-                // Auto-escape values unless they're marked as safe
-                const escaped = value && value.__safe ? value.toString() : escapeHtml(value);
-                return result + escaped + str;
-            });
-            
-            return { __safe: true, toString: () => html };
-        },
-
-        // Safe HTML marker
-        safe: function(html) {
-            return { __safe: true, toString: () => html };
-        },
-
-        // Create element from HTML string
-        fromHTML: function(html) {
-            const template = document.createElement('template');
-            template.innerHTML = html.trim();
-            return template.content.firstChild;
-        },
-
-        // Batch DOM updates
-        batch: function(updates) {
-            requestAnimationFrame(() => {
-                updates.forEach(update => update());
-            });
-        },
-
         toggle: function(el, show) {
             if (typeof el === 'string') el = getElement(el);
             if (el) {
@@ -248,29 +275,17 @@
             return el ? el.classList.contains(className) : false;
         },
 
-        // Query utilities with caching
+        // Query utilities
         query: function(selector, parent) {
             return (parent || document).querySelector(selector);
         },
 
         queryAll: function(selector, parent) {
             return Array.from((parent || document).querySelectorAll(selector));
-        },
-
-        // Delegated event handling
-        delegate: function(parent, eventType, selector, handler) {
-            if (typeof parent === 'string') parent = getElement(parent);
-            
-            parent.addEventListener(eventType, function(e) {
-                const target = e.target.closest(selector);
-                if (target && parent.contains(target)) {
-                    handler.call(target, e, target);
-                }
-            });
         }
     };
 
-    // Unified validation system (unchanged)
+    // Unified validation system
     const validators = {
         required: function(value, label) {
             return !value ? (label || 'Field') + ' is required' : null;
@@ -306,30 +321,12 @@
                 return 'Invalid image name format';
             }
             return null;
-        },
-
-        subnet: function(value) {
-            if (!value) return null;
-            if (!/^(\d{1,3}\.){3}\d{1,3}\/\d{1,2}$/.test(value)) {
-                return 'Invalid subnet format. Use CIDR notation (e.g., 172.20.0.0/16)';
-            }
-            return null;
-        },
-
-        ipAddress: function(value) {
-            if (!value) return null;
-            if (!/^(\d{1,3}\.){3}\d{1,3}$/.test(value)) {
-                return 'Invalid IP address format (e.g., 172.20.0.1)';
-            }
-            return null;
         }
     };
 
-    // Fixed Docker command builders
+    // Enhanced Docker command builders to handle all cases
     const dockerCommands = {
         compose: function(stack, action, options) {
-            // This now returns the command structure with a placeholder for the compose command
-            // The actual command will be resolved when executed
             const workDir = window.DockerManager.app.stacksPath + '/' + stack;
             const args = [].concat(action, options || []);
             return {
@@ -353,10 +350,35 @@
                 command: ['docker', type, action].concat(args || []),
                 options: options || { superuser: 'require' }
             };
+        },
+        
+        // New: Direct command builder for simple docker commands
+        docker: function(subcommand, args, options) {
+            return {
+                command: ['docker'].concat(subcommand).concat(args || []),
+                options: options || { superuser: 'try' }
+            };
+        },
+        
+        // New: Build a docker compose command array
+        buildCompose: function(stack, action, extraArgs) {
+            return getDockerComposeCommand().then(function(baseCommand) {
+                const workDir = window.DockerManager.app.stacksPath + '/' + stack;
+                const fullCommand = ['sh', '-c', 'cd "' + workDir + '" && ' + baseCommand + ' ' + action.join(' ') + (extraArgs ? ' ' + extraArgs : '') + ' 2>&1'];
+                return fullCommand;
+            });
+        },
+        
+        // New: Build a systemctl command
+        systemctl: function(action, service, options) {
+            return {
+                command: ['systemctl', action, service],
+                options: options || { superuser: 'require' }
+            };
         }
     };
 
-    // Unified error handling (unchanged)
+    // Unified error handling
     const errorHandler = {
         handle: function(error, context) {
             const message = this.parse(error, context);
@@ -400,7 +422,7 @@
         }
     };
 
-    // Batch operations framework with modern patterns
+    // Batch operations framework
     const batchOperations = {
         processSequentially: function(items, operation, delay) {
             const results = [];
@@ -467,31 +489,45 @@
         }
     };
 
-    // Parse Docker error messages for more helpful feedback
+    // Simplified Docker error parsing
     function parseDockerError(error) {
         if (!error) return 'Unknown error';
         
-        // Common Docker error patterns
+        // Convert error to string if it's not already
+        let errorStr = error;
+        if (typeof error === 'object') {
+            if (error.message) {
+                errorStr = error.message;
+            } else if (error.toString && error.toString() !== '[object Object]') {
+                errorStr = error.toString();
+            } else {
+                errorStr = JSON.stringify(error);
+            }
+        } else if (typeof error !== 'string') {
+            errorStr = String(error);
+        }
+        
+        // If it's just a generic exit status message, return something more helpful
+        if (errorStr === 'non-zero exit status' || errorStr === 'exit status 1') {
+            return 'Command failed - check the configuration for errors';
+        }
+        
+        // Common Docker error patterns (consolidated)
         const errorPatterns = [
             // Port conflicts
             { pattern: /bind.*address already in use/, extract: /bind: (.+)$/, message: 'Port conflict: ' },
             { pattern: /port is already allocated/, extract: /port (\d+)/, message: 'Port already in use: ' },
             
             // Network errors
-            { pattern: /failed to set up container networking/, message: 'Network configuration error: ' },
-            { pattern: /driver failed programming external connectivity/, message: 'Network connectivity error: ' },
             { pattern: /no such host/, message: 'DNS resolution failed - check network connection' },
             { pattern: /timeout/, message: 'Operation timed out - check network connection' },
             
             // Image errors
             { pattern: /pull access denied/, message: 'Cannot pull image - access denied or not found' },
-            { pattern: /image not found/, message: 'Docker image not found' },
             { pattern: /manifest.*not found/, message: 'Image not found in registry' },
             { pattern: /unauthorized/, message: 'Authentication required - image may be private' },
-            { pattern: /toomanyrequests/, message: 'Rate limit exceeded - too many pull requests' },
             
             // Volume/Mount errors
-            { pattern: /invalid mount config/, message: 'Invalid volume mount configuration' },
             { pattern: /no such file or directory/, extract: /no such file or directory.*"(.+)"/, message: 'Path not found: ' },
             
             // Resource errors
@@ -500,64 +536,99 @@
             
             // Permission errors
             { pattern: /permission denied/, message: 'Permission denied' },
-            { pattern: /operation not permitted/, message: 'Operation not permitted' },
             
             // Compose file errors
-            { pattern: /no configuration file/, message: 'No docker-compose.yaml file found' },
-            { pattern: /yaml:.*line \d+/, extract: /(yaml:.+)/, message: 'YAML syntax error: ' },
+            { pattern: /yaml:.*line \d+/, extract: /(yaml:.*line \d+:.*)/, message: '' },
+            { pattern: /mapping values are not allowed/, extract: /(.*line \d+:.*mapping values are not allowed.*)/, message: '' },
             
             // Service errors
-            { pattern: /no such service/, extract: /no such service: (.+)/, message: 'Service not found: ' },
-            { pattern: /services must be a mapping/, message: 'Invalid services configuration' },
-            
-            // System errors
-            { pattern: /Unit .* not found/, message: 'Docker service not installed' },
-            { pattern: /Failed to .* Unit/, message: 'Systemd service error' }
+            { pattern: /no such service/, extract: /no such service: (.+)/, message: 'Service not found: ' }
         ];
         
         // Try to match against known patterns
         for (let i = 0; i < errorPatterns.length; i++) {
             const pattern = errorPatterns[i];
-            if (pattern.pattern.test(error)) {
+            if (pattern.pattern.test(errorStr)) {
                 if (pattern.extract) {
-                    const match = error.match(pattern.extract);
+                    const match = errorStr.match(pattern.extract);
                     if (match && match[1]) {
                         return pattern.message + match[1];
                     }
                 }
-                return pattern.message + (pattern.extract ? error : '');
+                return pattern.message + (pattern.extract ? errorStr : '');
             }
         }
         
         // Extract "Error response from daemon:" messages
-        const daemonMatch = error.match(/Error response from daemon: (.+)/);
+        const daemonMatch = errorStr.match(/Error response from daemon: (.+)/);
         if (daemonMatch) {
             return daemonMatch[1];
         }
         
         // Look for ERROR: prefixed messages
-        const errorMatch = error.match(/ERROR:\s*(.+)/);
+        const errorMatch = errorStr.match(/ERROR:\s*(.+)/);
         if (errorMatch) {
             return errorMatch[1];
         }
         
         // If no pattern matched, try to extract the most relevant line
-        const lines = error.split('\n').filter(function(line) {
+        const lines = errorStr.split('\n').filter(function(line) {
             return line.trim() && !line.includes('docker compose') && !line.includes('docker-compose');
         });
         
         // Look for lines with error indicators
         const errorLine = lines.find(function(line) {
-            return line.toLowerCase().includes('error') || 
-                   line.toLowerCase().includes('failed') ||
-                   line.toLowerCase().includes('cannot');
+            const lowerLine = line.toLowerCase();
+            return lowerLine.includes('error') || 
+                   lowerLine.includes('failed') ||
+                   lowerLine.includes('cannot') ||
+                   line.includes('yaml:') ||
+                   line.includes('mapping values') ||
+                   line.includes('invalid') ||
+                   line.includes('unknown') ||
+                   line.includes('unsupported');
         });
         
-        return errorLine || lines[0] || error.split('\n')[0];
+        // If we found an error line, return it
+        if (errorLine) {
+            return errorLine.trim();
+        }
+        
+        // Otherwise, return the first non-empty line or a generic message
+        const firstLine = lines.find(function(line) { return line.trim(); });
+        return firstLine || 'Operation failed - check configuration';
     }
 
     // Parse docker-compose output for progress updates
     function parseDockerComposeProgress(line, stackName) {
+        // Skip empty lines
+        if (!line.trim()) return null;
+        
+        // Check for errors first (consolidated checks)
+        const errorIndicators = ['yaml:', 'YAML:', 'mapping values are not allowed', 'ERROR:', 'Error:', 
+                               'error:', 'failed to', 'Failed to', 'Error response from daemon', 
+                               'invalid reference format', 'Unknown key', 'Invalid interpolation', 
+                               'Unsupported config option', 'services must be a mapping', 
+                               'Cannot locate specified Dockerfile', 'build path', 'no such file or directory'];
+        
+        const hasError = errorIndicators.some(indicator => line.includes(indicator));
+        if (hasError) {
+            return {
+                type: 'error',
+                message: line.trim(),
+                isError: true
+            };
+        }
+        
+        // Check for warning that might indicate errors
+        if (line.includes('WARNING:') && (line.includes('no such service') || line.includes('orphan'))) {
+            return {
+                type: 'error',
+                message: line.trim().replace('WARNING:', 'Error:'),
+                isError: true
+            };
+        }
+        
         // Image pull progress
         if (line.includes('Pulling from') || line.includes('Pull complete')) {
             const imageMatch = line.match(/(\S+):\s*(Pulling from .+|Pull complete)/);
@@ -607,8 +678,8 @@
             };
         }
         
-        // Generic status
-        if (line.trim()) {
+        // Generic status - don't report every line, just meaningful ones
+        if (line.trim() && !line.startsWith(' ') && !line.match(/^\s*\d+\s*$/) && !line.includes('...')) {
             return {
                 type: 'status',
                 message: line.trim()
@@ -675,8 +746,8 @@
         
         return getDockerComposeCommand()
             .then(function(baseCommand) {
-                // Change to stack directory and run command
-                const fullCommand = ['sh', '-c', 'cd "' + workDir + '" && ' + baseCommand + ' ' + args.join(' ')];
+                // Change to stack directory and run command, redirect stderr to stdout to capture all output
+                const fullCommand = ['sh', '-c', 'cd "' + workDir + '" && ' + baseCommand + ' ' + args.join(' ') + ' 2>&1'];
                 const commandOptions = { superuser: 'require' };
                 if (options.suppressError) {
                     commandOptions.suppressError = true;
@@ -695,143 +766,91 @@
         
         return getDockerComposeCommand()
             .then(function(baseCommand) {
-                const fullCommand = ['sh', '-c', 'cd "' + workDir + '" && ' + baseCommand + ' ' + args.join(' ')];
+                const fullCommand = ['sh', '-c', 'cd "' + workDir + '" && ' + baseCommand + ' ' + args.join(' ') + ' 2>&1'];
                 const commandOptions = { superuser: 'require' };
+                
+                let errorMessages = [];
                 
                 return executeCommandStreaming(fullCommand, commandOptions, {
                     onOutput: function(line) {
                         const progress = parseDockerComposeProgress(line, stackName);
-                        if (progress && callbacks.onProgress) {
-                            callbacks.onProgress(progress);
+                        if (progress) {
+                            if (progress.isError) {
+                                errorMessages.push(progress.message);
+                            }
+                            if (callbacks.onProgress) {
+                                callbacks.onProgress(progress);
+                            }
+                        }
+                        
+                        // Also check for errors in regular output
+                        if (progress && progress.isError && callbacks.onError) {
+                            callbacks.onError(progress.message);
                         }
                     },
-                    onError: callbacks.onError
+                    onError: function(error) {
+                        if (callbacks.onError) {
+                            callbacks.onError(error);
+                        }
+                    }
+                }).then(function(result) {
+                    // If we collected error messages but result says success, mark as failure
+                    if (result.success && errorMessages.length > 0) {
+                        return {
+                            success: false,
+                            error: errorMessages.join('\n'),
+                            data: result.data
+                        };
+                    }
+                    return result;
                 });
             });
     }
 
-    // YAML syntax highlighting functions with modern DOM
-    function applyYamlHighlighting(textareaId) {
-        const textarea = getElement(textareaId);
-        if (!textarea) return;
-        
-        // Don't apply highlighting if textarea is empty or only has placeholder
-        if (!textarea.value.trim()) {
-            // Set up listener to apply highlighting when user starts typing
-            const inputHandler = function() {
-                if (textarea.value.trim()) {
-                    // Remove this listener
-                    textarea.removeEventListener('input', inputHandler);
-                    // Apply highlighting
-                    applyYamlHighlighting(textareaId);
-                }
-            };
-            textarea.addEventListener('input', inputHandler);
-            return;
+    // Simplified YAML validation without highlighting
+    function validateYamlContent(content) {
+        if (!content || !content.trim()) {
+            return { valid: false, error: 'Content cannot be empty' };
         }
         
-        // Create wrapper with proper structure
-        let wrapper = textarea.parentNode;
-        if (!wrapper.classList.contains('yaml-editor-wrapper')) {
-            wrapper = dom.create('div', { className: 'yaml-editor-wrapper' });
-            textarea.parentNode.insertBefore(wrapper, textarea);
-            wrapper.appendChild(textarea);
-        }
+        // Basic YAML validation checks
+        const lines = content.split('\n');
+        let currentIndent = 0;
+        let inListContext = false;
         
-        // Create highlighter if it doesn't exist
-        const highlighterId = textareaId + '-highlighter';
-        let highlighter = getElement(highlighterId);
-        
-        if (!highlighter) {
-            highlighter = dom.create('pre', {
-                id: highlighterId,
-                className: 'yaml-highlighter'
-            });
-            wrapper.insertBefore(highlighter, textarea);
+        for (let i = 0; i < lines.length; i++) {
+            const line = lines[i];
+            const trimmedLine = line.trim();
             
-            // Sync scroll
-            textarea.addEventListener('scroll', function() {
-                highlighter.scrollTop = textarea.scrollTop;
-                highlighter.scrollLeft = textarea.scrollLeft;
-            });
+            // Skip empty lines and comments
+            if (!trimmedLine || trimmedLine.startsWith('#')) continue;
             
-            // Update on input
-            textarea.addEventListener('input', function() {
-                updateYamlHighlighting(textareaId);
-            });
+            // Check for tabs (YAML doesn't allow tabs for indentation)
+            if (line.includes('\t')) {
+                return { 
+                    valid: false, 
+                    error: `Line ${i + 1}: YAML does not allow tabs for indentation. Use spaces instead.` 
+                };
+            }
+            
+            // Check for mapping values error (common YAML mistake)
+            if (line.match(/^\s*-\s*\w+:\s*$/)) {
+                return { 
+                    valid: false, 
+                    error: `Line ${i + 1}: Mapping values are not allowed in this context. Add a space after the dash or indent the key-value pair.` 
+                };
+            }
+            
+            // Check for common docker-compose requirement
+            if (i === 0 && !content.includes('services:')) {
+                return { 
+                    valid: false, 
+                    error: 'Docker Compose file must contain a "services:" section' 
+                };
+            }
         }
         
-        updateYamlHighlighting(textareaId);
-    }
-    
-    function updateYamlHighlighting(textareaId) {
-        const textarea = getElement(textareaId);
-        const highlighter = getElement(textareaId + '-highlighter');
-        if (!textarea || !highlighter) return;
-        
-        const text = textarea.value;
-        const highlighted = highlightYaml(text);
-        
-        highlighter.innerHTML = highlighted + '\n';
-        
-        // Sync dimensions
-        highlighter.style.width = textarea.offsetWidth + 'px';
-        highlighter.style.height = textarea.offsetHeight + 'px';
-    }
-    
-    function highlightYaml(text) {
-        // Apply syntax markers first (before HTML escaping)
-        // Use unique markers that won't conflict with YAML content
-        text = text.replace(/(#.*$)/gm, '\x01COMMENT\x02$1\x03');
-        text = text.replace(/^(\s*)([a-zA-Z_][a-zA-Z0-9_-]*):(?=\s|$)/gm, '$1\x01KEY\x02$2\x03:');
-        text = text.replace(/(["'])([^"']*)\1/g, '\x01STRING\x02$1$2$1\x03');
-        text = text.replace(/\b(\d+\.?\d*)\b/g, '\x01NUMBER\x02$1\x03');
-        text = text.replace(/\b(true|false|null|yes|no|on|off)\b/gi, '\x01BOOLEAN\x02$1\x03');
-        text = text.replace(/^(\s*)-\s/gm, '$1\x01LIST\x02-\x03 ');
-        text = text.replace(/\b(image|ports|volumes|environment|restart|depends_on|networks|build|command|expose|container_name|hostname|labels|deploy|replicas|resources|limits|reservations)\b/g, '\x01KEYWORD\x02$1\x03');
-        
-        // Now escape HTML
-        const div = document.createElement('div');
-        div.textContent = text;
-        text = div.innerHTML;
-        
-        // Replace markers with proper HTML spans
-        text = text.replace(/\x01COMMENT\x02(.*?)\x03/g, '<span class="yaml-comment">$1</span>');
-        text = text.replace(/\x01KEY\x02(.*?)\x03/g, '<span class="yaml-key">$1</span>');
-        text = text.replace(/\x01STRING\x02(.*?)\x03/g, '<span class="yaml-string">$1</span>');
-        text = text.replace(/\x01NUMBER\x02(.*?)\x03/g, '<span class="yaml-number">$1</span>');
-        text = text.replace(/\x01BOOLEAN\x02(.*?)\x03/g, '<span class="yaml-boolean">$1</span>');
-        text = text.replace(/\x01LIST\x02(.*?)\x03/g, '<span class="yaml-list">$1</span>');
-        text = text.replace(/\x01KEYWORD\x02(.*?)\x03/g, '<span class="yaml-docker-keyword">$1</span>');
-        
-        return text;
-    }
-
-    function removeYamlHighlighting(textareaId) {
-        const textarea = getElement(textareaId);
-        const wrapper = textarea ? textarea.parentNode : null;
-        
-        // Remove highlighter
-        const highlighter = getElement(textareaId + '-highlighter');
-        if (highlighter) {
-            highlighter.remove();
-        }
-        
-        // Unwrap if wrapped
-        if (wrapper && wrapper.classList.contains('yaml-editor-wrapper')) {
-            const parent = wrapper.parentNode;
-            parent.insertBefore(textarea, wrapper);
-            wrapper.remove();
-        }
-        
-        // Reset textarea styles
-        if (textarea) {
-            textarea.style.backgroundColor = '';
-            textarea.style.color = '';
-            textarea.style.position = '';
-            textarea.style.zIndex = '';
-            textarea.style.caretColor = '';
-        }
+        return { valid: true };
     }
 
     // Parse size strings (e.g., "1.5 GB") to bytes for sorting
@@ -844,7 +863,7 @@
         return 0;
     }
 
-    // Parse time strings to seconds for sorting
+    // Optimized time parsing
     function parseTime(time) {
         const units = {
             'second': 1, 'seconds': 1,
@@ -857,16 +876,14 @@
         
         if (time === 'Stopped' || time === 'N/A') return 0;
         
+        // Single regex to capture all time parts
+        const matches = time.matchAll(/(\d+)\s*(\w+)/g);
         let total = 0;
-        const parts = time.match(/(\d+)\s*(\w+)/g);
-        if (parts) {
-            parts.forEach(function(part) {
-                const match = part.match(/(\d+)\s*(\w+)/);
-                if (match) {
-                    total += parseInt(match[1]) * (units[match[2]] || 1);
-                }
-            });
+        
+        for (const match of matches) {
+            total += parseInt(match[1]) * (units[match[2]] || 1);
         }
+        
         return total;
     }
 
@@ -877,7 +894,6 @@
         executeCommandStreaming: executeCommandStreaming,
         getElement: getElement,
         showNotification: showNotification,
-        showProgressNotification: showProgressNotification,
         hideProgressNotification: hideProgressNotification,
         escapeHtml: escapeHtml,
         parseDockerError: parseDockerError,
@@ -888,14 +904,9 @@
         runDockerComposeStreaming: runDockerComposeStreaming,
         parseSize: parseSize,
         parseTime: parseTime,
+        validateYamlContent: validateYamlContent,
         
-        // YAML highlighting
-        applyYamlHighlighting: applyYamlHighlighting,
-        updateYamlHighlighting: updateYamlHighlighting,
-        highlightYaml: highlightYaml,
-        removeYamlHighlighting: removeYamlHighlighting,
-        
-        // Enhanced utilities (Priority 3 & 4)
+        // Enhanced utilities
         dom: dom,
         validators: validators,
         dockerCommands: dockerCommands,

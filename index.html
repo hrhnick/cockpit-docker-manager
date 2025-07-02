@@ -6,41 +6,6 @@
   <title>Docker manager</title>
   <link rel="stylesheet" href="style.css" onload="window.cssLoaded = true">
   
-  <!-- CSS Loading Detection Script -->
-  <script>
-    // Initialize CSS loading flag
-    window.cssLoaded = false;
-    
-    // Fallback detection for browsers that don't support onload for link tags
-    (function() {
-      var cssCheckInterval = setInterval(function() {
-        var sheets = document.styleSheets;
-        for (var i = 0; i < sheets.length; i++) {
-          if (sheets[i].href && sheets[i].href.includes('style.css')) {
-            try {
-              // Try to access rules - will throw if not loaded
-              var rules = sheets[i].cssRules || sheets[i].rules;
-              if (rules && rules.length > 0) {
-                window.cssLoaded = true;
-                clearInterval(cssCheckInterval);
-                console.log('CSS loaded via fallback detection');
-                break;
-              }
-            } catch (e) {
-              // Not loaded yet, continue checking
-            }
-          }
-        }
-      }, 10);
-      
-      // Stop checking after 5 seconds (failsafe)
-      setTimeout(function() {
-        clearInterval(cssCheckInterval);
-        window.cssLoaded = true; // Assume loaded to prevent infinite wait
-      }, 5000);
-    })();
-  </script>
-  
   <!-- Preload critical resources -->
   <link rel="preload" href="../base1/cockpit.js" as="script">
   <link rel="preload" href="modules/utils.js" as="script">
@@ -89,10 +54,6 @@
     .pf-v6-c-page__main {
       opacity: 0;
       transition: opacity 0.2s ease-in;
-    }
-    
-    .pf-v6-c-page__main[data-revealed="true"] {
-      opacity: 1;
     }
   </style>
 </head>

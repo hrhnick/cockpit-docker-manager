@@ -28,7 +28,7 @@ window.DockerManager.actions = {};
 
 console.log('Docker Manager namespace initialized');
 
-// Docker Manager - Main Application Coordinator
+// Docker Manager - Main Application Coordinator (Cleaned)
 (function() {
     'use strict';
 
@@ -54,92 +54,24 @@ console.log('Docker Manager namespace initialized');
         volumes: 'modules/volumes.js'
     };
 
-    // CSS Loading Detection - Ensure CSS is fully loaded before initializing
+    // Simple CSS loading check - just use the onload event
     function waitForCSS() {
         return new Promise(function(resolve) {
             // Check if our flag is set (from HTML onload)
             if (window.cssLoaded) {
-                // Force a reflow to ensure styles are applied
-                document.body.offsetHeight;
                 resolve();
                 return;
             }
             
-            // Fallback: Check if stylesheets are loaded
-            const styleSheets = document.styleSheets;
-            let cssLoaded = true;
-            
-            for (let i = 0; i < styleSheets.length; i++) {
-                try {
-                    // Try to access rules - will throw if not loaded
-                    if (styleSheets[i].href && styleSheets[i].href.includes('style.css')) {
-                        const rules = styleSheets[i].cssRules || styleSheets[i].rules;
-                        if (!rules || rules.length === 0) {
-                            cssLoaded = false;
-                        }
-                    }
-                } catch (e) {
-                    // StyleSheet not yet loaded
-                    cssLoaded = false;
-                    break;
-                }
-            }
-            
-            if (cssLoaded) {
-                // Force a reflow to ensure styles are applied
-                document.body.offsetHeight;
+            // Set a reasonable timeout as fallback
+            setTimeout(function() {
                 window.cssLoaded = true;
                 resolve();
-            } else {
-                // Retry after a short delay
-                setTimeout(function() {
-                    waitForCSS().then(resolve);
-                }, 10);
-            }
+            }, 100);
         });
     }
 
-    // Force CSS reflow to ensure proper rendering
-    function forceReflow() {
-        // Multiple techniques to force browser to recalculate styles
-        
-        // 1. Toggle display
-        const body = document.body;
-        const display = body.style.display;
-        body.style.display = 'none';
-        body.offsetHeight; // Trigger reflow
-        body.style.display = display;
-        
-        // 2. Force style recalculation on main containers
-        const containers = [
-            document.getElementById('main-content'),
-            document.querySelector('.pf-v6-c-page__main'),
-            document.querySelector('.service-status-section')
-        ];
-        
-        containers.forEach(function(container) {
-            if (container) {
-                // Use zoom trick to force repaint
-                container.style.zoom = 1.0000001;
-                container.offsetHeight; // Force reflow
-                
-                // Reset after a microtask
-                Promise.resolve().then(function() {
-                    container.style.zoom = '';
-                });
-            }
-        });
-        
-        // 3. Request animation frame to ensure paint
-        requestAnimationFrame(function() {
-            document.documentElement.style.opacity = '0.9999';
-            requestAnimationFrame(function() {
-                document.documentElement.style.opacity = '';
-            });
-        });
-    }
-
-    // Enhanced loading overlay hiding with fade effect
+    // Simplified loading overlay hiding
     function hideLoadingOverlay() {
         const loadingOverlay = window.DockerManager.utils.getElement('loading-overlay');
         if (!loadingOverlay) return;
@@ -150,58 +82,13 @@ console.log('Docker Manager namespace initialized');
         
         setTimeout(function() {
             loadingOverlay.style.display = 'none';
-            loadingOverlay.style.transition = '';
-            loadingOverlay.style.opacity = '';
             
-            // Force final reflow after hiding
-            forceReflow();
-            
-            // Ensure all content is visible with fade-in
+            // Ensure content is visible
             const content = document.querySelector('.pf-v6-c-page__main');
-            if (content && !content.dataset.revealed) {
-                content.dataset.revealed = 'true';
-                content.style.opacity = '0';
-                content.style.transition = 'opacity 0.2s ease-in';
-                
-                requestAnimationFrame(function() {
-                    content.style.opacity = '1';
-                    
-                    // Clean up after transition
-                    setTimeout(function() {
-                        content.style.transition = '';
-                        content.style.opacity = '';
-                    }, 200);
-                });
+            if (content) {
+                content.style.opacity = '1';
             }
         }, 300);
-    }
-
-    // Ensure rendering is complete before proceeding
-    function ensureRendered(callback) {
-        // Chain multiple techniques to ensure complete rendering
-        
-        // 1. Wait for next paint
-        requestAnimationFrame(function() {
-            // 2. Wait for following frame to ensure previous frame painted
-            requestAnimationFrame(function() {
-                // 3. Force style recalculation
-                window.getComputedStyle(document.body).height;
-                
-                // 4. Use setTimeout to break out of current execution context
-                setTimeout(function() {
-                    // 5. Check if document is fully loaded
-                    if (document.readyState === 'complete') {
-                        callback();
-                    } else {
-                        // Wait for window load event
-                        window.addEventListener('load', function() {
-                            // One more frame for good measure
-                            requestAnimationFrame(callback);
-                        });
-                    }
-                }, 0);
-            });
-        });
     }
 
     // Load a module dynamically
@@ -322,78 +209,69 @@ console.log('Docker Manager namespace initialized');
         const config = window.DockerManager.config;
         const ui = window.DockerManager.ui;
 
-        // Use enhanced loading overlay hiding
-        ensureRendered(function() {
-            hideLoadingOverlay();
-            
-            // Setup visibility change detection
-            setupVisibilityHandlers();
-            
-            // Setup activity tracking
-            setupActivityTracking();
-            
-            // Setup centralized event delegation (Priority 3)
-            setupEventDelegation();
-            
-            // Load configuration first
-            config.loadConfiguration()
-                .then(function() {
-                    return ui.detectDocker();
-                })
-                .then(function(installed) {
-                    if (installed) {
-                        utils.dom.toggle('service-status-section', true);
-                        utils.dom.toggle('main-content', true);
-                        utils.dom.toggle('docker-not-installed', false);
-                        
-                        // Force reflow after showing content
-                        forceReflow();
-                        
-                        ui.setupEventListeners();
-                        ui.loadServiceStatus();
-                        
-                        // Load update status first
-                        return config.loadUpdateStatus();
-                    }
-                    throw new Error('Docker not installed');
-                })
-                .then(function() {
-                    // Load stacks module and initial data
-                    return loadModule('stacks').then(function() {
-                        if (window.DockerManager.stacks) {
-                            window.DockerManager.stacks.loadStacks();
-                        }
-                        
-                        // Check if we should automatically check for updates
-                        return config.shouldCheckForUpdates();
-                    });
-                })
-                .then(function(shouldCheck) {
-                    if (shouldCheck) {
-                        // Check for updates in the background after page loads
-                        setTimeout(function() {
-                            if (window.DockerManager.stacks && window.DockerManager.stacks.checkAllStacksForUpdates) {
-                                window.DockerManager.stacks.checkAllStacksForUpdates(false);
-                            }
-                        }, 3000);
+        hideLoadingOverlay();
+        
+        // Setup visibility change detection
+        setupVisibilityHandlers();
+        
+        // Setup activity tracking
+        setupActivityTracking();
+        
+        // Setup centralized event delegation (Priority 3)
+        setupEventDelegation();
+        
+        // Load configuration first
+        config.loadConfiguration()
+            .then(function() {
+                return ui.detectDocker();
+            })
+            .then(function(installed) {
+                if (installed) {
+                    utils.dom.toggle('service-status-section', true);
+                    utils.dom.toggle('main-content', true);
+                    utils.dom.toggle('docker-not-installed', false);
+                    
+                    ui.setupEventListeners();
+                    ui.loadServiceStatus();
+                    
+                    // Load update status first
+                    return config.loadUpdateStatus();
+                }
+                throw new Error('Docker not installed');
+            })
+            .then(function() {
+                // Load stacks module and initial data
+                return loadModule('stacks').then(function() {
+                    if (window.DockerManager.stacks) {
+                        window.DockerManager.stacks.loadStacks();
                     }
                     
-                    // Start smart refresh timers
-                    startSmartRefresh();
-                })
-                .catch(function(error) {
-                    if (error.message === 'Docker not installed') {
-                        utils.dom.toggle('docker-not-installed', true);
-                        utils.dom.toggle('main-content', false);
-                        utils.dom.toggle('service-status-section', false);
-                        
-                        // Force reflow after showing error
-                        forceReflow();
-                    } else {
-                        utils.showNotification('Failed to initialize Docker manager', 'error');
-                    }
+                    // Check if we should automatically check for updates
+                    return config.shouldCheckForUpdates();
                 });
-        });
+            })
+            .then(function(shouldCheck) {
+                if (shouldCheck) {
+                    // Check for updates in the background after page loads
+                    setTimeout(function() {
+                        if (window.DockerManager.stacks && window.DockerManager.stacks.checkAllStacksForUpdates) {
+                            window.DockerManager.stacks.checkAllStacksForUpdates(false);
+                        }
+                    }, 3000);
+                }
+                
+                // Start smart refresh timers
+                startSmartRefresh();
+            })
+            .catch(function(error) {
+                if (error.message === 'Docker not installed') {
+                    utils.dom.toggle('docker-not-installed', true);
+                    utils.dom.toggle('main-content', false);
+                    utils.dom.toggle('service-status-section', false);
+                } else {
+                    utils.showNotification('Failed to initialize Docker manager', 'error');
+                }
+            });
     }
 
     // Setup centralized event delegation (Priority 3)
@@ -567,15 +445,15 @@ console.log('Docker Manager namespace initialized');
     // Export module loading function for UI to use
     window.DockerManager.loadModule = loadModule;
 
-    // Enhanced initialization with CSS loading detection
+    // Simplified initialization
     document.addEventListener('DOMContentLoaded', function() {
         console.log('DOM Content Loaded - Waiting for CSS...');
         
-        // Wait for CSS to be fully loaded
+        // Wait for CSS to be loaded
         waitForCSS().then(function() {
             console.log('CSS Loaded - Initializing application...');
             
-            // Give modules and cockpit a moment to initialize
+            // Give cockpit a moment to initialize
             setTimeout(function() {
                 if (typeof cockpit !== 'undefined') {
                     init();
@@ -587,7 +465,7 @@ console.log('Docker Manager namespace initialized');
                         }
                     }, 100);
                 }
-            }, 100);
+            }, 50);
         });
     });
 

@@ -7,226 +7,243 @@
     function utils() { return window.DockerManager.utils; }
     function modals() { return window.DockerManager.modals; }
 
-    // Create settings modal dynamically using DOM utilities (Priority 3)
-    function createSettingsModal() {
-        if (!window.DockerManager.modals) return null;
-        
-        const dom = utils().dom;
-        
-        const modalId = modals().createModal({
-            id: 'settings-modal',
-            title: 'Settings',
-            size: 'medium',
-            showFooter: false,
-            content: dom.create('form', { id: 'settings-form', noValidate: true }, [
-                // Stack Storage Section
-                dom.create('div', { className: 'settings-section' }, [
-                    dom.create('h4', { 
-                        className: 'settings-section-title',
-                        textContent: 'Stack Storage' 
-                    }),
-                    
-                    dom.create('div', { className: 'pf-v6-c-form__group' }, [
-                        dom.create('label', {
-                            className: 'pf-v6-c-form__label',
-                            for: 'stacks-path-input',
-                            textContent: 'Directory Path'
-                        }),
-                        dom.create('input', {
-                            className: 'pf-v6-c-form__input',
-                            type: 'text',
-                            id: 'stacks-path-input',
-                            name: 'stacks-path',
-                            required: true,
-                            autocomplete: 'off'
-                        }),
-                        dom.create('div', {
-                            className: 'pf-v6-c-form__helper-text',
-                            textContent: 'Where Docker stack configurations are stored. Default: /opt/stacks'
-                        })
-                    ]),
-                    
-                    dom.create('div', { className: 'settings-action-group' }, [
-                        dom.create('button', {
-                            type: 'button',
-                            className: 'pf-v6-c-button pf-v6-c-button--secondary has-tooltip',
-                            id: 'migrate-stacks-btn',
-                            dataset: { 
-                                tooltip: 'This will copy all existing stack configurations from the current directory to the new directory. Original files will not be deleted.' 
-                            },
-                            textContent: 'Migrate Existing Stacks'
-                        }),
-                        dom.create('div', {
-                            className: 'pf-v6-c-form__helper-text',
-                            textContent: 'Copy all existing stacks to the new directory before saving'
-                        })
-                    ])
-                ]),
-                
-                // Backup & Export Section
-                dom.create('div', { className: 'settings-section' }, [
-                    dom.create('h4', { 
-                        className: 'settings-section-title',
-                        textContent: 'Backup & Export' 
-                    }),
-                    dom.create('p', {
-                        className: 'settings-section-description',
-                        textContent: 'Export your stack configurations for backup or sharing'
-                    }),
-                    
-                    dom.create('div', { className: 'settings-action-group' }, [
-                        dom.create('button', {
-                            type: 'button',
-                            className: 'pf-v6-c-button pf-v6-c-button--secondary has-tooltip',
-                            id: 'export-stacks-btn',
-                            dataset: {
-                                tooltip: 'Creates a compressed archive (.tar.gz) containing all your stack configurations, including docker-compose files and environment variables. The archive can be used to restore stacks on another system.'
-                            },
-                            textContent: 'Export All Stacks'
-                        }),
-                        dom.create('div', {
-                            className: 'pf-v6-c-form__helper-text',
-                            textContent: 'Download a compressed archive containing all stack configurations'
-                        })
-                    ])
-                ]),
-                
-                // Updates Section
-                dom.create('div', { className: 'settings-section' }, [
-                    dom.create('h4', { 
-                        className: 'settings-section-title',
-                        textContent: 'Stack Updates' 
-                    }),
-                    dom.create('p', {
-                        className: 'settings-section-description',
-                        textContent: 'Check for updates to Docker images used in your stacks'
-                    }),
-                    
-                    dom.create('div', { className: 'settings-info-box' }, [
-                        dom.create('div', { className: 'info-row' }, [
-                            dom.create('span', { 
-                                className: 'info-label',
-                                textContent: 'Last check:' 
-                            }),
-                            dom.create('span', {
-                                id: 'last-update-check',
-                                className: 'info-value',
-                                textContent: 'Never checked'
-                            })
-                        ]),
-                        dom.create('div', { className: 'info-row' }, [
-                            dom.create('span', { 
-                                className: 'info-label',
-                                textContent: 'Auto-check:' 
-                            }),
-                            dom.create('span', {
-                                className: 'info-value has-tooltip',
-                                dataset: {
-                                    tooltip: 'Update checks happen automatically once every 24 hours when you open the Docker Manager'
-                                },
-                                textContent: 'Daily'
-                            })
-                        ]),
-                        dom.create('div', {
-                            className: 'info-row',
-                            id: 'update-status-row',
-                            style: 'display: none;'
-                        }, [
-                            dom.create('span', { 
-                                className: 'info-label',
-                                textContent: 'Status:' 
-                            }),
-                            dom.create('span', {
-                                id: 'update-status-value',
-                                className: 'info-value',
-                                textContent: '0 updates available'
-                            })
-                        ])
-                    ]),
-                    
-                    dom.create('div', { className: 'settings-button-group' }, [
-                        dom.create('button', {
-                            type: 'button',
-                            className: 'pf-v6-c-button pf-v6-c-button--secondary has-tooltip',
-                            id: 'check-updates-btn',
-                            dataset: {
-                                tooltip: 'Checks all Docker images used in your stacks against their registries to see if newer versions are available'
-                            }
-                        }, [
-                            dom.create('span', {
-                                className: 'button-text',
-                                textContent: 'Check for Updates'
-                            }),
-                            dom.create('span', {
-                                className: 'button-spinner',
-                                style: 'display: none;'
-                            }, [
-                                dom.create('span', { className: 'spinner-small' }),
-                                ' Checking...'
-                            ])
-                        ]),
-                        dom.create('button', {
-                            type: 'button',
-                            className: 'pf-v6-c-button pf-v6-c-button--primary has-tooltip',
-                            id: 'update-all-btn',
-                            dataset: {
-                                tooltip: 'Pulls the latest images and recreates containers for all stacks that have updates available. Creates a backup before updating.'
-                            },
-                            textContent: 'Update All Stacks'
-                        })
-                    ])
-                ])
-            ]).innerHTML,
-            onShow: function() {
-                const pathInput = utils().getElement('stacks-path-input');
-                pathInput.value = app().stacksPath;
-                utils().dom.removeClass(pathInput, 'error');
-                
-                // Load last update check time and update counts
-                loadUpdateCheckData().then(function(data) {
-                    const lastCheckElement = utils().getElement('last-update-check');
-                    if (data.lastCheck) {
-                        const date = new Date(data.lastCheck);
-                        lastCheckElement.textContent = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
-                    } else {
-                        lastCheckElement.textContent = 'Never checked';
-                    }
-                    
-                    // Count updates available
-                    updateUpdateStatusDisplay(data);
-                });
-                
-                // Add settings-specific event handlers
-                setupSettingsEventHandlers();
-                
-                // Initialize tooltips for the modal
-                if (window.DockerManager.ui && window.DockerManager.ui.initializeTooltips) {
-                    window.DockerManager.ui.initializeTooltips();
-                }
+    // Settings modal configuration
+    const settingsModalConfig = {
+        id: 'settings-modal',
+        title: 'Settings',
+        size: 'medium',
+        fields: [
+            {
+                name: 'stacks-path',
+                label: 'Stack Storage Directory',
+                type: 'text',
+                required: true,
+                placeholder: '/opt/stacks',
+                helperText: 'Where Docker stack configurations are stored. Default: /opt/stacks'
             }
-        });
+        ],
+        validators: {
+            'stacks-path': validateStacksPath
+        },
+        showFooter: false,
+        onShow: onSettingsModalShow,
+        onSubmit: function() { return false; } // Prevent default form submission
+    };
+
+    // Initialize modal on first use
+    let settingsModalId = null;
+    function ensureSettingsModal() {
+        if (!settingsModalId || !utils().getElement(settingsModalId)) {
+            settingsModalId = modals().createModal(settingsModalConfig);
+            
+            // Add custom content and footer after modal creation
+            const modal = utils().getElement(settingsModalId);
+            if (modal) {
+                const modalBody = modal.querySelector('.pf-v6-c-modal__body');
+                const form = modalBody.querySelector('form');
+                
+                // Add additional sections after the form
+                const additionalContent = createAdditionalSettingsContent();
+                modalBody.appendChild(additionalContent);
+                
+                // Add custom footer
+                const footer = createSettingsFooter();
+                modal.querySelector('.pf-v6-c-modal__box').appendChild(footer);
+                
+                // Setup event handlers
+                setupSettingsEventHandlers();
+            }
+        }
+    }
+
+    // Create additional settings content (migrate, backup, updates sections)
+    function createAdditionalSettingsContent() {
+        const dom = utils().dom;
+        const container = dom.create('div');
         
-        // Add custom footer after modal creation
-        const modal = utils().getElement(modalId);
-        if (modal) {
-            const footer = dom.create('footer', { className: 'pf-v6-c-modal__footer' }, [
+        // Stack Storage Section - Migrate button
+        const migrateSection = dom.create('div', { className: 'settings-action-group', style: 'margin-top: -16px; margin-bottom: 24px;' }, [
+            dom.create('button', {
+                type: 'button',
+                className: 'pf-v6-c-button pf-v6-c-button--secondary has-tooltip',
+                id: 'migrate-stacks-btn',
+                dataset: { 
+                    tooltip: 'This will copy all existing stack configurations from the current directory to the new directory. Original files will not be deleted.' 
+                },
+                textContent: 'Migrate Existing Stacks'
+            }),
+            dom.create('div', {
+                className: 'pf-v6-c-form__helper-text',
+                textContent: 'Copy all existing stacks to the new directory before saving'
+            })
+        ]);
+        
+        // Backup & Export Section
+        const backupSection = dom.create('div', { className: 'settings-section' }, [
+            dom.create('h4', { 
+                className: 'settings-section-title',
+                textContent: 'Backup & Export' 
+            }),
+            dom.create('p', {
+                className: 'settings-section-description',
+                textContent: 'Export your stack configurations for backup or sharing'
+            }),
+            
+            dom.create('div', { className: 'settings-action-group' }, [
                 dom.create('button', {
                     type: 'button',
-                    className: 'pf-v6-c-button pf-v6-c-button--primary',
-                    id: 'save-settings-btn',
-                    textContent: 'Save Changes'
+                    className: 'pf-v6-c-button pf-v6-c-button--secondary has-tooltip',
+                    id: 'export-stacks-btn',
+                    dataset: {
+                        tooltip: 'Creates a compressed archive (.tar.gz) containing all your stack configurations, including docker-compose files and environment variables. The archive can be used to restore stacks on another system.'
+                    },
+                    textContent: 'Export All Stacks'
                 }),
+                dom.create('div', {
+                    className: 'pf-v6-c-form__helper-text',
+                    textContent: 'Download a compressed archive containing all stack configurations'
+                })
+            ])
+        ]);
+        
+        // Updates Section
+        const updatesSection = dom.create('div', { className: 'settings-section' }, [
+            dom.create('h4', { 
+                className: 'settings-section-title',
+                textContent: 'Stack Updates' 
+            }),
+            dom.create('p', {
+                className: 'settings-section-description',
+                textContent: 'Check for updates to Docker images used in your stacks'
+            }),
+            
+            dom.create('div', { className: 'settings-info-box' }, [
+                dom.create('div', { className: 'info-row' }, [
+                    dom.create('span', { 
+                        className: 'info-label',
+                        textContent: 'Last check:' 
+                    }),
+                    dom.create('span', {
+                        id: 'last-update-check',
+                        className: 'info-value',
+                        textContent: 'Never checked'
+                    })
+                ]),
+                dom.create('div', { className: 'info-row' }, [
+                    dom.create('span', { 
+                        className: 'info-label',
+                        textContent: 'Auto-check:' 
+                    }),
+                    dom.create('span', {
+                        className: 'info-value has-tooltip',
+                        dataset: {
+                            tooltip: 'Update checks happen automatically once every 24 hours when you open the Docker Manager'
+                        },
+                        textContent: 'Daily'
+                    })
+                ]),
+                dom.create('div', {
+                    className: 'info-row',
+                    id: 'update-status-row',
+                    style: 'display: none;'
+                }, [
+                    dom.create('span', { 
+                        className: 'info-label',
+                        textContent: 'Status:' 
+                    }),
+                    dom.create('span', {
+                        id: 'update-status-value',
+                        className: 'info-value',
+                        textContent: '0 updates available'
+                    })
+                ])
+            ]),
+            
+            dom.create('div', { className: 'settings-button-group' }, [
                 dom.create('button', {
                     type: 'button',
-                    className: 'pf-v6-c-button pf-v6-c-button--secondary',
-                    id: 'cancel-settings-btn',
-                    textContent: 'Cancel'
+                    className: 'pf-v6-c-button pf-v6-c-button--secondary has-tooltip',
+                    id: 'check-updates-btn',
+                    dataset: {
+                        tooltip: 'Checks all Docker images used in your stacks against their registries to see if newer versions are available'
+                    }
+                }, [
+                    dom.create('span', {
+                        className: 'button-text',
+                        textContent: 'Check for Updates'
+                    }),
+                    dom.create('span', {
+                        className: 'button-spinner',
+                        style: 'display: none;'
+                    }, [
+                        dom.create('span', { className: 'spinner-small' }),
+                        ' Checking...'
+                    ])
+                ]),
+                dom.create('button', {
+                    type: 'button',
+                    className: 'pf-v6-c-button pf-v6-c-button--primary has-tooltip',
+                    id: 'update-all-btn',
+                    dataset: {
+                        tooltip: 'Pulls the latest images and recreates containers for all stacks that have updates available. Creates a backup before updating.'
+                    },
+                    textContent: 'Update All Stacks'
                 })
-            ]);
-            modal.querySelector('.pf-v6-c-modal__box').appendChild(footer);
+            ])
+        ]);
+        
+        container.appendChild(migrateSection);
+        container.appendChild(backupSection);
+        container.appendChild(updatesSection);
+        
+        return container;
+    }
+
+    // Create custom footer for settings modal
+    function createSettingsFooter() {
+        const dom = utils().dom;
+        return dom.create('footer', { className: 'pf-v6-c-modal__footer' }, [
+            dom.create('button', {
+                type: 'button',
+                className: 'pf-v6-c-button pf-v6-c-button--primary',
+                id: 'save-settings-btn',
+                textContent: 'Save Changes'
+            }),
+            dom.create('button', {
+                type: 'button',
+                className: 'pf-v6-c-button pf-v6-c-button--secondary',
+                id: 'cancel-settings-btn',
+                textContent: 'Cancel'
+            })
+        ]);
+    }
+
+    // On show callback for settings modal
+    function onSettingsModalShow() {
+        const pathInput = utils().getElement('stacks-path');
+        if (pathInput) {
+            pathInput.value = app().stacksPath;
+            utils().dom.removeClass(pathInput, 'error');
         }
         
-        return modalId;
+        // Load last update check time and update counts
+        loadUpdateCheckData().then(function(data) {
+            const lastCheckElement = utils().getElement('last-update-check');
+            if (data.lastCheck && lastCheckElement) {
+                const date = new Date(data.lastCheck);
+                lastCheckElement.textContent = date.toLocaleDateString() + ' ' + date.toLocaleTimeString();
+            } else if (lastCheckElement) {
+                lastCheckElement.textContent = 'Never checked';
+            }
+            
+            // Count updates available
+            updateUpdateStatusDisplay(data);
+        });
+        
+        // Initialize tooltips for the modal
+        if (window.DockerManager.ui && window.DockerManager.ui.initializeTooltips) {
+            window.DockerManager.ui.initializeTooltips();
+        }
     }
 
     // Setup settings-specific event handlers
@@ -248,14 +265,6 @@
                 window.DockerManager.stacks.updateAllStacks();
             }
         });
-    }
-
-    // Initialize modal on first use
-    let settingsModalId = null;
-    function ensureSettingsModal() {
-        if (!settingsModalId || !utils().getElement(settingsModalId)) {
-            settingsModalId = createSettingsModal();
-        }
     }
 
     // Configuration management using error handler (Priority 4)
@@ -561,7 +570,7 @@
 
     // Save settings using error handler (Priority 4)
     function saveSettings() {
-        const pathInput = utils().getElement('stacks-path-input');
+        const pathInput = utils().getElement('stacks-path');
         const newPath = pathInput.value.trim();
         const saveBtn = utils().getElement('save-settings-btn');
         const dom = utils().dom;
@@ -612,7 +621,7 @@
 
     // Migrate stacks using batch operations (Priority 3)
     function migrateStacks() {
-        const pathInput = utils().getElement('stacks-path-input');
+        const pathInput = utils().getElement('stacks-path');
         const newPath = pathInput.value.trim();
         const migrateBtn = utils().getElement('migrate-stacks-btn');
         const dom = utils().dom;

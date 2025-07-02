@@ -14,7 +14,7 @@
             return {
                 confirm: `Remove ${type} "${displayName || id}"?`,
                 confirmTitle: `Remove ${type.charAt(0).toUpperCase() + type.slice(1)}`,
-                command: ['docker', type, 'rm', id],
+                command: utils().dockerCommands.resource(type, 'rm', [id]).command,
                 successMessage: `${type.charAt(0).toUpperCase() + type.slice(1)} removed successfully`,
                 errorHandler: function(error) {
                     return handleResourceInUseError(error, type);
@@ -198,7 +198,7 @@
             const tableId = resourceType + '-table';
             table().showLoading(tableId);
             
-            const listCommand = ['docker', dockerCommand, 'ls', '--format', 'json'];
+            const listCommand = utils().dockerCommands.resource(dockerCommand, 'ls', ['--format', 'json']).command;
             
             utils().executeCommand(listCommand, { superuser: 'try', suppressError: true })
                 .then(function(result) {
@@ -386,37 +386,44 @@
 
     // Batch load image usage information
     function loadImageUsageBatched(images, renderCallback) {
-        // Get all container images in one command
-        Promise.all([
-            utils().executeCommand(['docker', 'ps', '-a', '--format', '{{.Image}}'], 
-                { superuser: 'try', suppressError: true }),
-            utils().executeCommand(['docker', 'ps', '-a', '--filter', 'status=exited', '--filter', 'status=paused', '--format', '{{.Image}}'], 
-                { superuser: 'try', suppressError: true })
-        ]).then(function(results) {
-            const runningImages = results[0].success ? results[0].data.split('\n').filter(function(line) { return line.trim(); }) : [];
-            const stoppedImages = results[1].success ? results[1].data.split('\n').filter(function(line) { return line.trim(); }) : [];
-            
-            // Create a Set for O(1) lookup
-            const usedImagesSet = new Set();
-            runningImages.concat(stoppedImages).forEach(function(img) {
-                usedImagesSet.add(img);
-                // Also add without tag for :latest matching
-                const colonIndex = img.lastIndexOf(':');
-                if (colonIndex > -1) {
-                    usedImagesSet.add(img.substring(0, colonIndex));
-                }
-            });
+        // Get all container images in one command using batchOperations
+        const tasks = [
+            function() { 
+                return utils().executeCommand(['docker', 'ps', '-a', '--format', '{{.Image}}'], 
+                    { superuser: 'try', suppressError: true });
+            },
+            function() { 
+                return utils().executeCommand(['docker', 'ps', '-a', '--filter', 'status=exited', '--filter', 'status=paused', '--format', '{{.Image}}'], 
+                    { superuser: 'try', suppressError: true });
+            }
+        ];
+        
+        utils().batchOperations.processParallel(tasks, function(task) { return task(); }, 2)
+            .then(function(results) {
+                const runningImages = results[0].success ? results[0].data.split('\n').filter(function(line) { return line.trim(); }) : [];
+                const stoppedImages = results[1].success ? results[1].data.split('\n').filter(function(line) { return line.trim(); }) : [];
+                
+                // Create a Set for O(1) lookup
+                const usedImagesSet = new Set();
+                runningImages.concat(stoppedImages).forEach(function(img) {
+                    usedImagesSet.add(img);
+                    // Also add without tag for :latest matching
+                    const colonIndex = img.lastIndexOf(':');
+                    if (colonIndex > -1) {
+                        usedImagesSet.add(img.substring(0, colonIndex));
+                    }
+                });
 
-            images.forEach(function(image) {
-                const imageName = image.repository + ':' + image.tag;
-                image.inUse = usedImagesSet.has(imageName) ||
-                            usedImagesSet.has(image.repository) ||
-                            usedImagesSet.has(image.id.substring(0, 12));
-            });
+                images.forEach(function(image) {
+                    const imageName = image.repository + ':' + image.tag;
+                    image.inUse = usedImagesSet.has(imageName) ||
+                                usedImagesSet.has(image.repository) ||
+                                usedImagesSet.has(image.id.substring(0, 12));
+                });
 
-            app().images = images;
-            renderCallback();
-        });
+                app().images = images;
+                renderCallback();
+            });
     }
 
     // Batch load network containers using batchOperations (Priority 3)
@@ -450,7 +457,7 @@
         });
     }
 
-    // Batch load volume details using batchOperations (Priority 3)
+    // Batch load volume details using batchOperations (Priority 3) - fully converted
     function loadVolumeDetailsBatched(volumes, renderCallback) {
         if (volumes.length === 0) {
             app().volumes = volumes;
@@ -460,110 +467,124 @@
 
         const volumeNames = volumes.map(function(v) { return v.name; });
         
-        Promise.all([
+        // Use batchOperations for the two main commands
+        const mainTasks = [
             // Get all volume details in one command
-            utils().executeCommand(['docker', 'volume', 'inspect'].concat(volumeNames), 
-                { superuser: 'try', suppressError: true }),
+            function() {
+                return utils().executeCommand(['docker', 'volume', 'inspect'].concat(volumeNames), 
+                    { superuser: 'try', suppressError: true });
+            },
             // Get all container mounts
-            utils().executeCommand(['docker', 'ps', '-a', '--format', '{{.Names}}|{{.Mounts}}'], 
-                { superuser: 'try', suppressError: true })
-        ]).then(function(results) {
-            // Process volume inspect data
-            if (results[0].success) {
-                try {
-                    const inspectData = JSON.parse(results[0].data);
-                    inspectData.forEach(function(volData, index) {
-                        if (volumes[index]) {
-                            volumes[index].mountpoint = volData.Mountpoint || '';
-                            volumes[index].created = volData.CreatedAt || '';
-                        }
-                    });
-                } catch (e) {
-                    // Continue with what we have
-                }
+            function() {
+                return utils().executeCommand(['docker', 'ps', '-a', '--format', '{{.Names}}|{{.Mounts}}'], 
+                    { superuser: 'try', suppressError: true });
             }
-
-            // Process container mounts
-            if (results[1].success) {
-                const mountData = results[1].data.trim().split('\n');
-                const volumeContainerMap = {};
-                
-                mountData.forEach(function(line) {
-                    const parts = line.split('|');
-                    if (parts.length >= 2) {
-                        const containerName = parts[0];
-                        const mounts = parts[1];
-                        
-                        volumes.forEach(function(volume) {
-                            if (mounts.includes(volume.name)) {
-                                if (!volumeContainerMap[volume.name]) {
-                                    volumeContainerMap[volume.name] = [];
-                                }
-                                volumeContainerMap[volume.name].push(containerName);
+        ];
+        
+        utils().batchOperations.processParallel(mainTasks, function(task) { return task(); }, 2)
+            .then(function(results) {
+                // Process volume inspect data
+                if (results[0].success) {
+                    try {
+                        const inspectData = JSON.parse(results[0].data);
+                        inspectData.forEach(function(volData, index) {
+                            if (volumes[index]) {
+                                volumes[index].mountpoint = volData.Mountpoint || '';
+                                volumes[index].created = volData.CreatedAt || '';
                             }
                         });
+                    } catch (e) {
+                        // Continue with what we have
                     }
-                });
-                
-                volumes.forEach(function(volume) {
-                    volume.containers = volumeContainerMap[volume.name] || [];
-                });
-            }
+                }
 
-            // Get sizes using batch operations
-            const mountpoints = volumes
-                .filter(function(v) { return v.mountpoint; })
-                .map(function(v) { return v.mountpoint; });
-            
-            if (mountpoints.length > 0) {
-                // Process in smaller batches to avoid command line length limits
-                utils().batchOperations.processParallel(
-                    mountpoints,
-                    function(batch) {
-                        return utils().executeCommand(['du', '-sh'].concat(batch), 
-                            { superuser: 'try', suppressError: true });
-                    },
-                    20 // Process 20 at a time
-                ).then(function(results) {
-                    // Combine all results
-                    results.forEach(function(result) {
-                        if (result.success) {
-                            const lines = result.data.trim().split('\n');
-                            lines.forEach(function(line) {
-                                const parts = line.split('\t');
-                                if (parts.length >= 2) {
-                                    const size = parts[0];
-                                    const path = parts[1];
-                                    
-                                    const volume = volumes.find(function(v) { 
-                                        return v.mountpoint === path; 
-                                    });
-                                    if (volume) {
-                                        volume.size = size;
+                // Process container mounts
+                if (results[1].success) {
+                    const mountData = results[1].data.trim().split('\n');
+                    const volumeContainerMap = {};
+                    
+                    mountData.forEach(function(line) {
+                        const parts = line.split('|');
+                        if (parts.length >= 2) {
+                            const containerName = parts[0];
+                            const mounts = parts[1];
+                            
+                            volumes.forEach(function(volume) {
+                                if (mounts.includes(volume.name)) {
+                                    if (!volumeContainerMap[volume.name]) {
+                                        volumeContainerMap[volume.name] = [];
                                     }
+                                    volumeContainerMap[volume.name].push(containerName);
                                 }
                             });
                         }
                     });
                     
-                    // Set N/A for volumes without size
                     volumes.forEach(function(volume) {
-                        if (volume.size === 'Calculating...') {
-                            volume.size = 'N/A';
-                        }
+                        volume.containers = volumeContainerMap[volume.name] || [];
                     });
+                }
+
+                // Get sizes using batch operations
+                const mountpoints = volumes
+                    .filter(function(v) { return v.mountpoint; })
+                    .map(function(v) { return v.mountpoint; });
+                
+                if (mountpoints.length > 0) {
+                    // Split mountpoints into chunks of 20
+                    const chunks = [];
+                    for (let i = 0; i < mountpoints.length; i += 20) {
+                        chunks.push(mountpoints.slice(i, i + 20));
+                    }
                     
+                    // Process chunks in parallel
+                    utils().batchOperations.processParallel(
+                        chunks,
+                        function(batch) {
+                            return utils().executeCommand(['du', '-sh'].concat(batch), 
+                                { superuser: 'try', suppressError: true });
+                        },
+                        5 // Process 5 chunks at a time
+                    ).then(function(sizeResults) {
+                        // Combine all results
+                        sizeResults.forEach(function(result) {
+                            if (result.success) {
+                                const lines = result.data.trim().split('\n');
+                                lines.forEach(function(line) {
+                                    const parts = line.split('\t');
+                                    if (parts.length >= 2) {
+                                        const size = parts[0];
+                                        const path = parts[1];
+                                        
+                                        const volume = volumes.find(function(v) { 
+                                            return v.mountpoint === path; 
+                                        });
+                                        if (volume) {
+                                            volume.size = size;
+                                        }
+                                    }
+                                });
+                            }
+                        });
+                        
+                        // Set N/A for volumes without size
+                        volumes.forEach(function(volume) {
+                            if (volume.size === 'Calculating...') {
+                                volume.size = 'N/A';
+                            }
+                        });
+                        
+                        app().volumes = volumes;
+                        renderCallback();
+                    });
+                } else {
+                    volumes.forEach(function(volume) {
+                        volume.size = 'N/A';
+                    });
                     app().volumes = volumes;
                     renderCallback();
-                });
-            } else {
-                volumes.forEach(function(volume) {
-                    volume.size = 'N/A';
-                });
-                app().volumes = volumes;
-                renderCallback();
-            }
-        });
+                }
+            });
     }
 
     // Get default columns for resource type
@@ -703,11 +724,11 @@
         }
     }
 
-    // Build create command
+    // Build create command using dockerCommands
     function buildCreateCommand(type, formData) {
         switch (type) {
             case 'image':
-                return ['docker', 'pull', formData['image-name']];
+                return utils().dockerCommands.docker(['pull'], [formData['image-name']]).command;
             case 'network':
                 return buildNetworkCreateCommand(formData);
             case 'volume':
@@ -717,7 +738,7 @@
 
     // Build network create command
     function buildNetworkCreateCommand(formData) {
-        const args = ['docker', 'network', 'create'];
+        const args = ['network', 'create'];
         args.push('--driver', formData['network-driver']);
         
         if (formData['network-internal']) args.push('--internal');
@@ -727,12 +748,12 @@
         
         args.push(formData['network-name']);
         
-        return args;
+        return utils().dockerCommands.docker(args, []).command;
     }
 
     // Build volume create command
     function buildVolumeCreateCommand(formData) {
-        const args = ['docker', 'volume', 'create'];
+        const args = ['volume', 'create'];
         args.push('--driver', formData['volume-driver']);
         
         // Parse driver options
@@ -749,7 +770,7 @@
         
         args.push(formData['volume-name']);
         
-        return args;
+        return utils().dockerCommands.docker(args, []).command;
     }
 
     // Handle resource in use errors
@@ -769,7 +790,7 @@
     function getPruneConfig(resourceType) {
         const base = {
             title: 'Prune ' + resourceType.charAt(0).toUpperCase() + resourceType.slice(1),
-            command: ['docker', resourceType.slice(0, -1), 'prune', '-f']
+            command: utils().dockerCommands.resource(resourceType.slice(0, -1), 'prune', ['-f']).command
         };
         
         switch (resourceType) {

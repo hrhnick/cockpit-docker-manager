@@ -52,10 +52,10 @@
             ],
             validators: {
                 'volume-driver-opts': function(value) {
-                    return resources().validateKeyValueFormat(value, 'Options');
+                    return window.DockerManager.utils.validators.keyValue(value, 'Options');
                 },
                 'volume-labels': function(value) {
-                    return resources().validateKeyValueFormat(value, 'Labels');
+                    return window.DockerManager.utils.validators.keyValue(value, 'Labels');
                 }
             },
             submitLabel: 'Create'

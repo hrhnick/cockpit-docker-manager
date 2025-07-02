@@ -24,7 +24,7 @@
                     .then(function(composeResult) {
                         if (!composeResult.success) {
                             // Try docker compose v2
-                            return utils().executeCommand(['docker', 'compose', 'version']);
+                            return utils().executeCommand(utils().dockerCommands.docker(['compose', 'version']).command);
                         }
                         return composeResult;
                     });
@@ -36,7 +36,8 @@
     }
 
     function loadServiceStatus() {
-        utils().executeCommand(['systemctl', 'is-active', 'docker'], { suppressError: true })
+        const systemctlCommand = utils().dockerCommands.systemctl('is-active', 'docker', { suppressError: true });
+        utils().executeCommand(systemctlCommand.command, systemctlCommand.options)
             .then(function(result) {
                 const status = result.success && result.data.trim() === 'active' ? 'active' : 'inactive';
                 updateServiceStatus(status);
@@ -79,17 +80,18 @@
         }
     }
 
-    // Service control functions using resource actions (Priority 4)
+    // Service control functions using resource actions (Priority 4) and dockerCommands
     function startDockerService() {
         const startBtn = utils().getElement('start-service-btn');
         const resources = window.DockerManager.resources;
         
         startBtn.disabled = true;
         
+        const systemctlCommand = utils().dockerCommands.systemctl('start', 'docker');
         const action = {
             message: 'Starting Docker service...',
-            command: ['systemctl', 'start', 'docker'],
-            options: { superuser: 'require' },
+            command: systemctlCommand.command,
+            options: systemctlCommand.options,
             successMessage: 'Docker service started successfully',
             onSuccess: function() {
                 setTimeout(function() {
@@ -111,10 +113,11 @@
         
         restartBtn.disabled = true;
         
+        const systemctlCommand = utils().dockerCommands.systemctl('restart', 'docker');
         const action = {
             message: 'Restarting Docker service...',
-            command: ['systemctl', 'restart', 'docker'],
-            options: { superuser: 'require' },
+            command: systemctlCommand.command,
+            options: systemctlCommand.options,
             successMessage: 'Docker service restarted successfully',
             onSuccess: function() {
                 setTimeout(function() {
@@ -138,9 +141,14 @@
         stopBtn.disabled = true;
         restartBtn.disabled = true;
         
+        // Build compound command to stop all containers first, then stop docker
+        const stopContainersCmd = 'docker ps -q | xargs -r docker stop';
+        const stopServicesCmd = 'systemctl stop docker.socket docker.service';
+        const fullCommand = ['sh', '-c', stopContainersCmd + ' && ' + stopServicesCmd];
+        
         const action = {
             message: 'Stopping Docker service and all containers...',
-            command: ['sh', '-c', 'docker ps -q | xargs -r docker stop && systemctl stop docker.socket docker.service'],
+            command: fullCommand,
             options: { superuser: 'require' },
             successMessage: 'Docker service and all containers stopped',
             onSuccess: function() {

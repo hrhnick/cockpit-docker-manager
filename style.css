@@ -1,14 +1,12 @@
-/* PatternFly-inspired styles for Cockpit Docker Manager - Optimized v6 */
+/* PatternFly-inspired styles for Cockpit Docker Manager - Optimized v6 (Cleaned) */
 
 /* Performance optimizations for initial render */
 body {
-    /* Prevent layout shifts during loading */
     min-height: 100vh;
     contain: layout style;
 }
 
 .pf-v6-c-page__main {
-    /* Improve rendering performance */
     will-change: contents;
     contain: layout style;
 }
@@ -190,7 +188,6 @@ p { margin: 0 0 var(--space-md); line-height: 1.6; }
   height: 1px;
   width: 100%;
   margin: var(--space-lg) 0;
-  background: var(--border-primary);
 }
 
 /* Service Status */
@@ -357,6 +354,8 @@ textarea {
   white-space: pre;
   word-wrap: normal;
   overflow: auto;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
 }
 
 /* Tables */
@@ -468,7 +467,7 @@ textarea {
   white-space: nowrap;
 }
 
-/* Buttons */
+/* Buttons - Consolidated with CSS variables */
 .pf-v6-c-button,
 .table-action-btn {
   display: inline-flex;
@@ -523,7 +522,7 @@ textarea {
   transform: none;
 }
 
-/* Button variants using CSS variables */
+/* Button variants using CSS custom properties */
 .pf-v6-c-button--primary,
 .table-action-btn.primary {
   --btn-bg: var(--primary);
@@ -542,42 +541,48 @@ textarea {
   --btn-hover-border: var(--border-dark);
 }
 
+/* Outline button variants - consolidated */
+.pf-v6-c-button--danger-outline,
+.table-action-btn.danger,
+.pf-v6-c-button--success-outline,
+.table-action-btn.success,
+.pf-v6-c-button--warning-outline,
+.table-action-btn.warning,
+.pf-v6-c-button--primary-outline,
+.table-action-btn.info {
+  --btn-bg: transparent;
+  --btn-hover-color: white;
+}
+
 .pf-v6-c-button--danger-outline,
 .table-action-btn.danger {
-  --btn-bg: transparent;
   --btn-color: var(--danger);
   --btn-border: var(--danger);
   --btn-hover-bg: var(--danger);
-  --btn-hover-color: white;
 }
 
 .pf-v6-c-button--success-outline,
 .table-action-btn.success {
-  --btn-bg: transparent;
   --btn-color: var(--success);
   --btn-border: var(--success);
   --btn-hover-bg: var(--success);
-  --btn-hover-color: white;
 }
 
 .pf-v6-c-button--warning-outline,
 .table-action-btn.warning {
-  --btn-bg: transparent;
   --btn-color: var(--warning);
   --btn-border: var(--warning);
   --btn-hover-bg: var(--warning);
-  --btn-hover-color: white;
 }
 
 .pf-v6-c-button--primary-outline,
 .table-action-btn.info {
-  --btn-bg: transparent;
   --btn-color: var(--primary);
   --btn-border: var(--primary);
   --btn-hover-bg: var(--primary);
-  --btn-hover-color: white;
 }
 
+/* Apply button styles from CSS variables */
 .pf-v6-c-button,
 .table-action-btn {
   background: var(--btn-bg);
@@ -600,7 +605,7 @@ textarea {
   flex-wrap: wrap;
 }
 
-/* Status badges */
+/* Status badges - Consolidated */
 .status-badge,
 .status-badge-small {
   display: inline-block;
@@ -618,6 +623,7 @@ textarea {
   font-size: var(--font-sm);
 }
 
+/* Status colors - using CSS variables */
 .status-active,
 .running,
 .in-use {
@@ -715,7 +721,7 @@ textarea {
   font-size: var(--font-sm);
 }
 
-/* Port links */
+/* Port links - Consolidated */
 .port-link,
 .port-link-inline,
 .port-link-large {
@@ -786,6 +792,7 @@ textarea {
   flex-direction: column;
 }
 
+/* Modal sizes using CSS variables */
 .modal-small { max-width: 400px; }
 .modal-medium { max-width: 600px; }
 .modal-large { max-width: 900px; }
@@ -1178,7 +1185,7 @@ textarea {
   margin: 0;
 }
 
-/* Action banner */
+/* Action banner - Consolidated */
 #action-banner {
   position: fixed;
   top: 0;
@@ -1193,27 +1200,36 @@ textarea {
   transition: all 0.3s;
 }
 
+/* Action banner variants using CSS variables */
 #action-banner.info {
-  background: var(--info);
-  color: #002952;
+  --banner-bg: var(--info);
+  --banner-color: #002952;
+  background: var(--banner-bg);
+  color: var(--banner-color);
 }
 
 #action-banner.success {
-  background: #e7f5e7;
-  color: var(--success);
+  --banner-bg: #e7f5e7;
+  --banner-color: var(--success);
+  background: var(--banner-bg);
+  color: var(--banner-color);
 }
 
 #action-banner.error {
-  background: #faeaea;
-  color: var(--danger);
+  --banner-bg: #faeaea;
+  --banner-color: var(--danger);
+  background: var(--banner-bg);
+  color: var(--banner-color);
 }
 
 #action-banner.warning {
-  background: #fdf4e5;
-  color: var(--warning-dark);
+  --banner-bg: #fdf4e5;
+  --banner-color: var(--warning-dark);
+  background: var(--banner-bg);
+  color: var(--banner-color);
 }
 
-/* Loading overlay - Ensure smooth display */
+/* Loading overlay */
 #loading-overlay {
   position: fixed;
   inset: 0;
@@ -1224,61 +1240,6 @@ textarea {
   z-index: var(--z-overlay);
   transition: opacity 0.3s ease-out;
 }
-
-/* YAML syntax highlighting */
-.yaml-editor-wrapper {
-  position: relative;
-  display: block;
-}
-
-.yaml-highlighter {
-  position: absolute;
-  inset: 0;
-  padding: var(--padding-input);
-  border: 1px solid var(--border-primary);
-  border-radius: var(--radius);
-  background: var(--bg-secondary);
-  font-family: var(--font-mono);
-  font-size: var(--font-sm);
-  line-height: 1.5;
-  overflow: auto;
-  white-space: pre;
-  word-wrap: normal;
-  pointer-events: none;
-  z-index: 1;
-  resize: none;
-  margin: 0;
-}
-
-.yaml-editor-wrapper .docker-compose-editor {
-  position: relative;
-  z-index: 2;
-  background: transparent !important;
-  color: transparent !important;
-  caret-color: var(--text-primary) !important;
-}
-
-.yaml-editor-wrapper .docker-compose-editor:placeholder-shown {
-  color: var(--text-muted) !important;
-}
-
-.yaml-editor-wrapper .docker-compose-editor::placeholder {
-  color: var(--text-muted) !important;
-  opacity: 1 !important;
-}
-
-.yaml-editor-wrapper .docker-compose-editor:focus::placeholder {
-  color: transparent !important;
-}
-
-/* YAML syntax colors */
-.yaml-comment { color: #6a737d; font-style: italic; }
-.yaml-key { color: #d73a49; font-weight: 500; }
-.yaml-string { color: #032f62; }
-.yaml-number { color: #005cc5; }
-.yaml-boolean { color: #005cc5; font-weight: 500; }
-.yaml-list { color: #d73a49; font-weight: 700; }
-.yaml-docker-keyword { color: #6f42c1; font-weight: 500; }
 
 /* Utility classes */
 .sr-only {
@@ -1346,20 +1307,23 @@ textarea {
     border-top-color: var(--primary);
   }
   
-  /* YAML syntax colors for dark mode */
-  .yaml-comment { color: #8b949e; }
-  .yaml-key { color: #ff7b72; }
-  .yaml-string { color: #a5d6ff; }
-  .yaml-number { color: #79c0ff; }
-  .yaml-boolean { color: #79c0ff; }
-  .yaml-list { color: #ff7b72; }
-  .yaml-docker-keyword { color: #d2a8ff; }
-  
-  /* Action banner dark mode */
-  #action-banner.info { background: rgba(115, 188, 247, 0.2); color: var(--info); }
-  #action-banner.success { background: rgba(91, 163, 82, 0.2); color: var(--success); }
-  #action-banner.error { background: rgba(240, 57, 43, 0.2); color: var(--danger); }
-  #action-banner.warning { background: rgba(240, 171, 0, 0.2); color: var(--warning); }
+  /* Action banner dark mode using CSS variables */
+  #action-banner.info { 
+    --banner-bg: rgba(115, 188, 247, 0.2);
+    --banner-color: var(--info);
+  }
+  #action-banner.success { 
+    --banner-bg: rgba(91, 163, 82, 0.2);
+    --banner-color: var(--success);
+  }
+  #action-banner.error { 
+    --banner-bg: rgba(240, 57, 43, 0.2);
+    --banner-color: var(--danger);
+  }
+  #action-banner.warning { 
+    --banner-bg: rgba(240, 171, 0, 0.2);
+    --banner-color: var(--warning);
+  }
   
   #loading-overlay { background: rgba(21, 21, 21, 0.95); }
   
