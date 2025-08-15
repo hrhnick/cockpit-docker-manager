@@ -129,19 +129,6 @@
                         textContent: 'Never checked'
                     })
                 ]),
-                dom.create('div', { className: 'info-row' }, [
-                    dom.create('span', { 
-                        className: 'info-label',
-                        textContent: 'Auto-check:' 
-                    }),
-                    dom.create('span', {
-                        className: 'info-value has-tooltip',
-                        dataset: {
-                            tooltip: 'Update checks happen automatically once every 24 hours when you open the Docker Manager'
-                        },
-                        textContent: 'Daily'
-                    })
-                ]),
                 dom.create('div', {
                     className: 'info-row',
                     id: 'update-status-row',
@@ -166,24 +153,14 @@
                     id: 'check-updates-btn',
                     dataset: {
                         tooltip: 'Checks all Docker images used in your stacks against their registries to see if newer versions are available'
-                    }
-                }, [
-                    dom.create('span', {
-                        className: 'button-text',
-                        textContent: 'Check for Updates'
-                    }),
-                    dom.create('span', {
-                        className: 'button-spinner',
-                        style: 'display: none;'
-                    }, [
-                        dom.create('span', { className: 'spinner-small' }),
-                        ' Checking...'
-                    ])
-                ]),
+                    },
+                    textContent: 'Check for Updates'
+                }),
                 dom.create('button', {
                     type: 'button',
                     className: 'pf-v6-c-button pf-v6-c-button--primary has-tooltip',
                     id: 'update-all-btn',
+                    style: 'display: none;',
                     dataset: {
                         tooltip: 'Pulls the latest images and recreates containers for all stacks that have updates available. Creates a backup before updating.'
                     },
@@ -236,7 +213,7 @@
                 lastCheckElement.textContent = 'Never checked';
             }
             
-            // Count updates available
+            // Count updates available and update display (this will also show/hide the Update All button)
             updateUpdateStatusDisplay(data);
         });
         
@@ -529,18 +506,25 @@
         
         const statusRow = utils().getElement('update-status-row');
         const statusValue = utils().getElement('update-status-value');
+        const updateAllBtn = utils().getElement('update-all-btn');
         
         if (statusRow && statusValue) {
             if (updateCount > 0) {
                 dom.toggle(statusRow, true);
                 statusValue.textContent = updateCount + ' stack' + (updateCount !== 1 ? 's' : '') + ' with updates available';
                 statusValue.style.color = 'var(--pf-global--warning-color--100)';
+                // Show the Update All button when updates are available
+                if (updateAllBtn) dom.toggle(updateAllBtn, true);
             } else if (data && data.lastCheck) {
                 dom.toggle(statusRow, true);
                 statusValue.textContent = 'All stacks up to date';
                 statusValue.style.color = 'var(--pf-global--success-color--100)';
+                // Hide the Update All button when no updates
+                if (updateAllBtn) dom.toggle(updateAllBtn, false);
             } else {
                 dom.toggle(statusRow, false);
+                // Hide the Update All button when no data
+                if (updateAllBtn) dom.toggle(updateAllBtn, false);
             }
         }
     }
@@ -688,9 +672,10 @@
         const checkBtn = utils().getElement('check-updates-btn');
         if (!checkBtn) return;
         
-        // Add loading state
-        utils().dom.addClass(checkBtn, 'is-loading');
+        // Save original text and update to loading state
+        const originalText = checkBtn.textContent;
         checkBtn.disabled = true;
+        checkBtn.textContent = 'Checking...';
         
         // Perform the check
         if (window.DockerManager.stacks && window.DockerManager.stacks.checkAllStacksForUpdates) {
@@ -709,14 +694,14 @@
                     }
                 })
                 .finally(function() {
-                    // Remove loading state
-                    utils().dom.removeClass(checkBtn, 'is-loading');
+                    // Restore original state
                     checkBtn.disabled = false;
+                    checkBtn.textContent = originalText;
                 });
         } else {
-            // Remove loading state if stacks module not loaded
-            utils().dom.removeClass(checkBtn, 'is-loading');
+            // Restore original state if stacks module not loaded
             checkBtn.disabled = false;
+            checkBtn.textContent = originalText;
             utils().showNotification('Unable to check for updates', 'error');
         }
     }

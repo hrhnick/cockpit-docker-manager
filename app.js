@@ -245,21 +245,9 @@ console.log('Docker Manager namespace initialized');
                     if (window.DockerManager.stacks) {
                         window.DockerManager.stacks.loadStacks();
                     }
-                    
-                    // Check if we should automatically check for updates
-                    return config.shouldCheckForUpdates();
                 });
             })
-            .then(function(shouldCheck) {
-                if (shouldCheck) {
-                    // Check for updates in the background after page loads
-                    setTimeout(function() {
-                        if (window.DockerManager.stacks && window.DockerManager.stacks.checkAllStacksForUpdates) {
-                            window.DockerManager.stacks.checkAllStacksForUpdates(false);
-                        }
-                    }, 3000);
-                }
-                
+            .then(function() {
                 // Start smart refresh timers
                 startSmartRefresh();
             })
